@@ -3,20 +3,30 @@
 body {
   font-family: Arial, sans-serif;
   margin: 20px;
+  background-color: #f9f9f9;
 }
 
 #container {
-  max-width: 800px;
+  max-width: 900px;
   margin: auto;
+  background-color: #fff;
+  padding: 20px;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+}
+
+h1 {
+  text-align: center;
+  margin-bottom: 30px;
 }
 
 .uploader, .input-group, .download-buttons {
-  margin-bottom: 15px;
+  margin-bottom: 20px;
 }
 
 label {
   display: block;
   margin-bottom: 5px;
+  font-weight: bold;
 }
 
 input[type="file"], input[type="number"] {
@@ -28,16 +38,24 @@ input[type="file"], input[type="number"] {
 button {
   padding: 10px 20px;
   font-size: 16px;
+  cursor: pointer;
+}
+
+button:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
 }
 
 #results table {
   width: 100%;
   border-collapse: collapse;
+  margin-top: 20px;
 }
 
 #results th, #results td {
   border: 1px solid #ddd;
   padding: 8px;
+  text-align: center;
 }
 
 #results th {
@@ -47,4 +65,5 @@ button {
 #map {
   height: 400px;
   margin-top: 20px;
+  border: 1px solid #ddd;
 }
