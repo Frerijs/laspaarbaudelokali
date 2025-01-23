@@ -541,8 +541,7 @@ if __name__ == "__main__":
     main()
     `;
 
-    // Tagad izmantojam stlite.mount, lai pārlūkā palaistu Pyodide + tavu Python kodu.
-    // Pievērs uzmanību "requirements": jānorāda visas ārējās bibliotēkas.
+    // Izmantojam stlite.mount, lai palaistu Pyodide + tavu Python kodu pārlūkā
     stlite.mount({
       code: code,
       requirements: [
