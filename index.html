@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>LAS-CSV Salīdzināšana (stlite demo)</title>
+  <!-- Iekļaujam stlite bundli no CDN, kas satur Pyodide un Streamlit -->
+  <script src="https://unpkg.com/@stlite/mount/dist/index.js"></script>
+</head>
+<body>
+  <div id="app"></div>
+  <script>
+    // Šī ir Tava Python koda versija (mazliet formatēta teksta virknē).
+    // Pārliecinies, ka iekļauj visas importētās bibliotēkas "requirements" sarakstā (skatīt zemāk).
+    const code = `
+import streamlit as st
+import requests
+import datetime
+from zoneinfo import ZoneInfo
+
+import laspy
+import pandas as pd
+import numpy as np
+from scipy.spatial import cKDTree
+
+import pydeck as pdk
+from pyproj import Transformer
+import math
+
+import ezdxf
+import io
+
+# ======================================================================
+#                         SUPABASE AUTORIZĀCIJA
+# ======================================================================
+
+supabase_url = "https://uhwbflqdripatfpbbetf.supabase.co"
+supabase_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVod2JmbHFkcmlwYXRmcGJiZXRmIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTczMDcxODE2MywiZXhwIjoyMDQ2Mjk0MTYzfQ.78wsNZ4KBg2l6zeZ1ZknBBooe0PeLtJzRU-7eXo3WTk"  # Aizvietojiet ar drošu metodi
+
+
+APP_NAME = "LAS-CSV Salīdzināšana"
+APP_VERSION = "1.0"
+APP_TYPE = "web"
+
+def authenticate(username, password):
+    try:
+        headers = {
+            "apikey": supabase_key,
+            "Authorization": f"Bearer {supabase_key}",
+            "Content-Type": "application/json",
+        }
+        url = f"{supabase_url}/rest/v1/users"
+        params = {
+            "select": "*",
+            "username": f"eq.{username}",
+            "password": f"eq.{password}",
+        }
+        response = requests.get(url, headers=headers, params=params)
+        if response.status_code == 200:
+            data = response.json()
+            return len(data) > 0
+        else:
+            st.error(f"Kļūda autentificējot lietotāju: {response.status_code}")
+            return False
+    except Exception as e:
+        st.error(f"Kļūda: {str(e)}")
+        return False
+
+def log_user_login(username):
+    try:
+        riga_tz = ZoneInfo('Europe/Riga')
+        current_time = datetime.datetime.now(riga_tz).isoformat()
+
+        data = {
+            "username": username,
+            "App": APP_NAME,
+            "Ver": APP_VERSION,
+            "app_type": APP_TYPE,
+            "login_time": current_time
+        }
+
+        headers = {
+            "apikey": supabase_key,
+            "Authorization": f"Bearer {supabase_key}",
+            "Content-Type": "application/json"
+        }
+        url = f"{supabase_url}/rest/v1/user_data"
+
+        response = requests.post(url, json=data, headers=headers)
+        if response.status_code not in [200, 201]:
+            st.error(f"Kļūda ierakstot datus: {response.status_code}, {response.text}")
+    except Exception as e:
+        st.error(f"Kļūda: {str(e)}")
+
+def login():
+    username = st.session_state.get('username', '').strip()
+    password = st.session_state.get('password', '').strip()
+    if not username or not password:
+        st.error("Lūdzu, ievadiet gan lietotājvārdu, gan paroli.")
+    else:
+        if authenticate(username, password):
+            st.session_state.logged_in = True
+            st.session_state.username_logged = username
+            log_user_login(username)
+        else:
+            st.error("Nepareizs lietotājvārds vai parole.")
+
+def show_login():
+    st.title("CSV un LAS salīdzināšana")
+    with st.form(key='login_form'):
+        st.text_input("Lietotājvārds", key='username')
+        st.text_input("Parole", type="password", key='password')
+        st.form_submit_button(label="Pieslēgties", on_click=login)
+    st.markdown("<div style='text-align: center; margin-top: 20px; color: gray;'>© 2025 METRUM</div>", unsafe_allow_html=True)
+
+# ======================================================================
+#                     LAS/CSV SALĪDZINĀŠANAS FUNKCIJAS
+# ======================================================================
+
+def load_las_points(las_file) -> np.ndarray:
+    las = laspy.read(las_file)
+    ground_mask = (las.classification == 2)
+    X = las.x[ground_mask]
+    Y = las.y[ground_mask]
+    Z = las.z[ground_mask]
+    return np.vstack((X, Y, Z)).T
+
+def load_csv_points(csv_file) -> pd.DataFrame:
+    df = pd.read_csv(csv_file)
+    rename_map = {}
+    for c in df.columns:
+        c_lower = c.lower()
+        if c_lower in ['x', 'y', 'z']:
+            rename_map[c] = c_lower.upper()
+    df.rename(columns=rename_map, inplace=True)
+    required_cols = {'X', 'Y', 'Z'}
+    if not required_cols.issubset(df.columns):
+        raise ValueError(f"CSV failam jābūt kolonnām: {required_cols}.")
+    return df
+
+def find_nearest_z_diff(las_points: np.ndarray, csv_df: pd.DataFrame, max_distance: float = 0.2) -> pd.DataFrame:
+    las_xy = las_points[:, :2]
+    tree = cKDTree(las_xy)
+    nearest_las_x = []
+    nearest_las_y = []
+    nearest_las_z = []
+    z_diff_list = []
+
+    for i, (x, y) in enumerate(csv_df[['X','Y']].values):
+        dist, idx = tree.query([x, y], k=1)
+        if dist <= max_distance:
+            las_x = las_points[idx, 0]
+            las_y = las_points[idx, 1]
+            las_z = las_points[idx, 2]
+            csv_z = csv_df.loc[i,'Z']
+            z_diff = csv_z - las_z
+        else:
+            las_x = np.nan
+            las_y = np.nan
+            las_z = np.nan
+            z_diff = np.nan
+        nearest_las_x.append(las_x)
+        nearest_las_y.append(las_y)
+        nearest_las_z.append(las_z)
+        z_diff_list.append(z_diff)
+
+    csv_df['LAS_X'] = nearest_las_x
+    csv_df['LAS_Y'] = nearest_las_y
+    csv_df['LAS_Z'] = nearest_las_z
+    csv_df['Z_diff'] = z_diff_list
+
+    return csv_df
+
+def classify_z_diff(z: float) -> list:
+    import pandas as pd
+    if pd.isna(z):
+        return [255, 255, 255]
+    val = abs(z)
+    if val <= 0.1:
+        return [0, 255, 0]
+    elif val <= 0.2:
+        return [255, 165, 0]
+    elif val <= 0.5:
+        return [255, 0, 0]
+    elif val <= 1.0:
+        return [0, 0, 255]
+    else:
+        return [128, 0, 128]
+
+def create_dxf_bytes(result_df: pd.DataFrame) -> bytes:
+    doc = ezdxf.new(dxfversion="R2010")
+    msp = doc.modelspace()
+    style_name = "Tahoma"
+    if style_name not in doc.styles:
+        doc.styles.new(style_name, dxfattribs={"font": "Tahoma.ttf"})
+    import pandas as pd
+    for idx, row in result_df.iterrows():
+        x, y, z = row['X'], row['Y'], row['Z']
+        if not pd.isna(x) and not pd.isna(y) and not pd.isna(z):
+            rgb = classify_z_diff(row['Z_diff'])
+            true_col = ezdxf.rgb2int(tuple(rgb))
+            msp.add_point((x, y, z), dxfattribs={"layer": "CSV_POINTS","true_color": true_col})
+    valid_las = result_df.dropna(subset=['LAS_X','LAS_Y','LAS_Z'])
+    for idx, row in valid_las.iterrows():
+        lx, ly, lz = row['LAS_X'], row['LAS_Y'], row['LAS_Z']
+        rgb = classify_z_diff(row['Z_diff'])
+        true_col = ezdxf.rgb2int(tuple(rgb))
+
+        msp.add_point((lx, ly, lz), dxfattribs={"layer": "LAS_POINTS","true_color": true_col})
+        z_str = f"{row['Z_diff']:.2f}"
+        txt = msp.add_text(text=z_str, dxfattribs={
+            "layer": "LAS_POINTS","true_color": true_col,"height": 1.0,"style": style_name
+        })
+        txt.dxf.insert = (lx, ly, lz)
+        txt.dxf.halign = 0
+        txt.dxf.valign = 3
+        txt.dxf.align_point = (lx, ly, lz)
+
+    buffer = io.StringIO()
+    doc.write(buffer)
+    dxf_txt = buffer.getvalue()
+    buffer.close()
+    return dxf_txt.encode('utf-8')
+
+def app_main():
+    st.title("CSV un LAS salīdzināšana")
+    las_file = st.file_uploader("Augšupielādē .las/.laz failu", type=["las", "laz"])
+    csv_file = st.file_uploader("Augšupielādē .csv failu", type=["csv"])
+    max_dist = st.number_input("Maksimālais attālums (m)", 0.0, 1000.0, 0.2, 0.1)
+
+    if las_file and csv_file:
+        try:
+            las_points = load_las_points(las_file)
+            csv_df = load_csv_points(csv_file)
+            result_df = find_nearest_z_diff(las_points, csv_df, max_distance=max_dist)
+
+            valid_z = result_df['Z_diff'].dropna()
+            if not valid_z.empty:
+                count_val = len(valid_z)
+                min_val = valid_z.min()
+                max_val = valid_z.max()
+                mean_val = valid_z.mean()
+                rmse_val = math.sqrt((valid_z**2).mean())
+                st.markdown("### Statistika")
+                st.markdown(f"""
+                - **Salīdzināto punktu skaits**: {count_val}
+                - **Minimālā starpība**: {min_val:.2f}
+                - **Maksimālā starpība**: {max_val:.2f}
+                - **Vidējā starpība**: {mean_val:.2f}
+                - **Kvad.vid. kļūda (RMSE)**: {rmse_val:.2f}
+                """)
+            else:
+                st.warning("Nevienam CSV punktam netika atrasts tuvākais LAS punkts norādītajā attālumā.")
+
+            # Pydeck kartes izveide
+            from pyproj import Transformer
+            transformer = Transformer.from_crs("EPSG:3059", "EPSG:4326", always_xy=True)
+            csv_map = result_df[['X','Y','Z','Z_diff']].copy()
+            las_map = result_df[['LAS_X','LAS_Y','LAS_Z','Z_diff']].dropna(subset=['LAS_X','LAS_Y','LAS_Z'])
+
+            def transform_xy(x, y):
+                lon, lat = transformer.transform(x, y)
+                return lon, lat
+
+            csv_map['lon'], csv_map['lat'] = transform_xy(csv_map['X'].values, csv_map['Y'].values)
+            las_map['lon'], las_map['lat'] = transform_xy(las_map['LAS_X'].values, las_map['LAS_Y'].values)
+            csv_map['color'] = csv_map['Z_diff'].apply(classify_z_diff)
+            las_map['color'] = las_map['Z_diff'].apply(classify_z_diff)
+
+            line_data = []
+            for i, row in result_df.iterrows():
+                if not math.isnan(row['LAS_X']) and not math.isnan(row['LAS_Y']):
+                    csv_lon, csv_lat = transformer.transform(row['X'], row['Y'])
+                    las_lon, las_lat = transformer.transform(row['LAS_X'], row['LAS_Y'])
+                    c = classify_z_diff(row['Z_diff'])
+                    line_data.append({
+                        "source": [csv_lon, csv_lat],
+                        "target": [las_lon, las_lat],
+                        "color": c
+                    })
+
+            csv_circle = pdk.Layer(
+                "ScatterplotLayer",
+                data=csv_map,
+                get_position='[lon, lat]',
+                get_radius=2,
+                stroked=True,
+                filled=True,
+                get_fill_color=[0,0,0,0],
+                get_line_color='color',
+                line_width_min_pixels=2,
+                pickable=True
+            )
+            csv_center = pdk.Layer(
+                "ScatterplotLayer",
+                data=csv_map,
+                get_position='[lon, lat]',
+                get_radius=0.01,
+                stroked=False,
+                filled=True,
+                get_fill_color=[0,0,0],
+                pickable=True
+            )
+            las_circle = pdk.Layer(
+                "ScatterplotLayer",
+                data=las_map,
+                get_position='[lon, lat]',
+                get_radius=2,
+                stroked=True,
+                filled=True,
+                get_fill_color=[0,0,0,0],
+                get_line_color='color',
+                line_width_min_pixels=2,
+                pickable=True
+            )
+            las_center = pdk.Layer(
+                "ScatterplotLayer",
+                data=las_map,
+                get_position='[lon, lat]',
+                get_radius=0.01,
+                stroked=False,
+                filled=True,
+                get_fill_color=[0,0,0],
+                pickable=True
+            )
+            line_layer = pdk.Layer(
+                "LineLayer",
+                data=line_data,
+                get_source_position='source',
+                get_target_position='target',
+                get_color='color',
+                get_width=2
+            )
+
+            layers = [csv_circle, csv_center, line_layer, las_circle, las_center]
+            center_lat = csv_map['lat'].mean() if not csv_map.empty else 56.95
+            center_lon = csv_map['lon'].mean() if not csv_map.empty else 24.11
+            tooltip = {
+                "html": "<b>Z_diff:</b> {Z_diff} m<br/>Koord. (WGS84): [{lon}, {lat}]",
+                "style": {"color": "white","backgroundColor": "#2B2B2B"}
+            }
+            deck_map = pdk.Deck(
+                map_style="mapbox://styles/mapbox/light-v9",
+                initial_view_state=pdk.ViewState(
+                    latitude=center_lat,
+                    longitude=center_lon,
+                    zoom=13,
+                    pitch=0
+                ),
+                layers=layers,
+                tooltip=tooltip
+            )
+            st.subheader("Kartes vizualizācija")
+            st.pydeck_chart(deck_map)
+
+            st.markdown("### Krāsu klasifikācija")
+            st.markdown(\"\"\"
+- **<=0.1 m**: Zaļš
+- **<=0.2 m**: Oranžs
+- **<=0.5 m**: Sarkans
+- **<=1.0 m**: Zils
+- **>1.0 m**: Violets
+- **Nav atrasts**: Balts
+\"\"\")
+
+            st.markdown("### Lejupielādēt rezultātu (EPSG:3059)")
+            csv_export = result_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="Lejupielādēt CSV",
+                data=csv_export,
+                file_name="z_diff_results.csv",
+                mime="text/csv"
+            )
+            dxf_data = create_dxf_bytes(result_df)
+            st.download_button(
+                label="Lejupielādēt DXF",
+                data=dxf_data,
+                file_name="points_3059.dxf",
+                mime="application/dxf"
+            )
+        except Exception as e:
+            st.error(f"Radās kļūda: {e}")
+
+    if st.button("Iziet"):
+        st.session_state.logged_in = False
+        st.success("Veiksmīgi izgājāt no konta.")
+
+def main():
+    if 'logged_in' not in st.session_state:
+        st.session_state.logged_in = False
+    if 'username_logged' not in st.session_state:
+        st.session_state.username_logged = ''
+
+    if not st.session_state.logged_in:
+        show_login()
+    else:
+        app_main()
+
+if __name__ == "__main__":
+    main()
+    `;
+
+    // Tagad izmantojam stlite.mount, lai pārlūkā palaistu Pyodide + tavu Python kodu.
+    // Pievērs uzmanību "requirements": jānorāda visas ārējās bibliotēkas.
+    stlite.mount({
+      code: code,
+      // Ja vēlies, vari piefiksēt konkrētās versijas (bieži ieteicams, piem. "requests==2.28.1")
+      // Pie lieliem pkg. ielāde var būt samērā liela, jo Pyodide lejupielādē bināros failus (WASM).
+      requirements: [
+        "requests",
+        "laspy",
+        "pandas",
+        "numpy",
+        "scipy",
+        "pydeck",
+        "pyproj",
+        "ezdxf",
+      ],
+    }, document.getElementById("app"));
+  </script>
+</body>
+</html>
