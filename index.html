@@ -2,7 +2,9 @@
 <html lang="lv">
 <head>
   <meta charset="UTF-8">
-  <title>Datuma Apstrāde ar Pyodide</title>
+  <title>LAS-CSV Salīdzināšana ar Stlite</title>
+  <!-- Iekļauj stlite bundli no jsDelivr CDN ar defer atribūtu -->
+  <script src="https://cdn.jsdelivr.net/npm/@stlite/mount/dist/index.js" defer></script>
   <style>
     body {
       display: flex;
@@ -15,71 +17,131 @@
       background-color: #f0f0f0;
     }
     #app {
-      width: 300px;
-      padding: 20px;
-      background-color: #fff;
-      border: 1px solid #ccc;
-      border-radius: 5px;
-    }
-    input, button {
-      width: 100%;
-      padding: 10px;
-      margin: 5px 0;
-      font-size: 16px;
-    }
-    #result {
+      width: 80%;
+      height: 80%;
       margin-top: 20px;
-      font-weight: bold;
+      border: 1px solid #ccc;
+      padding: 10px;
+      background-color: #fff;
+    }
+    h1 {
       color: #333;
     }
   </style>
-  <!-- Iekļauj Pyodide no CDN -->
-  <script src="https://cdn.jsdelivr.net/pyodide/v0.23.4/full/pyodide.js"></script>
 </head>
 <body>
-  <div id="app">
-    <h2>Teksta Apstrāde ar Python</h2>
-    <input type="text" id="userInput" placeholder="Ievadi tekstu">
-    <button onclick="processInput()">Apstrādāt</button>
-    <div id="result"></div>
-  </div>
-
+  <!-- Statisk "HELLO WORLD" -->
+  <h1>HELLO WORLD</h1>
+  
+  <!-- Ietvars, kur tiks rādīta Streamlit lietotne -->
+  <div id="app"></div>
+  
   <script>
-    let pyodideReady = false;
-    let pyodide = null;
+    // Pārliecinies, ka stlite ir ielādēts pirms izsauc stlite.mount
+    window.addEventListener('load', () => {
+      if (typeof stlite === 'undefined') {
+        console.error("stlite ir neizsaukts. Pārbaudi CDN saiti.");
+      } else {
+        const code = `
+import streamlit as st
+import datetime
+from zoneinfo import ZoneInfo
 
-    // Ielādē Pyodide
-    async function loadPyodideAndPackages() {
-      pyodide = await loadPyodide();
-      pyodideReady = true;
-      console.log("Pyodide ielādēts!");
-    }
+# ======================================================================
+#                         SUPABASE AUTORIZĀCIJA
+# ======================================================================
 
-    loadPyodideAndPackages();
+# Supabase konfigurācija
+supabase_url = "https://uhwbflqdripatfpbbetf.supabase.co"
+supabase_key = "YOUR_SUPABASE_KEY"
 
-    async function processInput() {
-      if (!pyodideReady) {
-        alert("Lūdzu, gaidi, līdz Pyodide ir ielādēts.");
-        return;
-      }
+# Konstantes
+APP_NAME = "LAS-CSV Salīdzināšana"
+APP_VERSION = "1.0"
+APP_TYPE = "web"
 
-      const input = document.getElementById('userInput').value;
-      try {
-        // Vienkārša Python apstrāde: pārvērst tekstu uz lielajiem burtiem
-        const pythonCode = `
-def process(text):
-    return text.upper()
+def authenticate(username, password):
+    """
+    Pārbauda, vai lietotājvārds un parole eksistē Supabase tabulā users.
+    """
+    # Pieejas kods jāpielāgo, ņemot vērā Pyodide ierobežojumus
+    st.write("Autentifikācija nav atbalstīta klienta pusē.")
+    return False
 
-result = process("${input}")
+def log_user_login(username):
+    """
+    Pieraksta lietotāja pieslēgšanās brīdi Supabase tabulā user_data.
+    """
+    # Pieejas kods jāpielāgo, ņemot vērā Pyodide ierobežojumus
+    st.write("Lietotāja pieslēgšanās reģistrācija nav atbalstīta klienta pusē.")
+
+def login():
+    """
+    Izsauc reālo autentifikācijas funkciju un, ja veiksmīgi,
+    iestata st.session_state.logged_in = True.
+    """
+    username = st.session_state.get('username', '').strip()
+    password = st.session_state.get('password', '').strip()
+    if not username or not password:
+        st.error("Lūdzu, ievadiet gan lietotājvārdu, gan paroli.")
+    else:
+        if authenticate(username, password):
+            st.session_state.logged_in = True
+            st.session_state.username_logged = username
+            log_user_login(username)
+        else:
+            st.error("Nepareizs lietotājvārds vai parole.")
+
+def show_login():
+    """
+    Attēlo pieteikšanās formu.
+    """
+    st.title("CSV un LAS salīdzināšana")
+    with st.form(key='login_form'):
+        st.text_input("Lietotājvārds", key='username')
+        st.text_input("Parole", type="password", key='password')
+        st.form_submit_button(label="Pieslēgties", on_click=login)
+    st.markdown("<div style='text-align: center; margin-top: 20px; color: gray;'>© 2025 METRUM</div>", unsafe_allow_html=True)
+
+# ======================================================================
+#                     GALVENĀ LIETOTNES FUNKCIJA (LAS/CSV salīdzināšana)
+# ======================================================================
+
+def app_main():
+    """
+    Galvenā LAS/CSV salīdzināšanas lietotne. 
+    Šī funkcija tiek izpildīta tikai tad, ja lietotājs ir autorizējies.
+    """
+    st.title("CSV un LAS salīdzināšana")
+    st.write("Autentifikācija ir atvērta tikai servera pusē. Šī funkcija nav atbalstīta.")
+
+# ======================================================================
+#                           GALVENAIS IEEJAS PUNKTS
+# ======================================================================
+
+def main():
+    # Nodrošinām, ka st.session_state ir definēti mainīgie
+    if 'logged_in' not in st.session_state:
+        st.session_state.logged_in = False
+    if 'username_logged' not in st.session_state:
+        st.session_state.username_logged = ''
+
+    # Ja nav autorizējies, rādām login formu, citādi galveno app
+    if not st.session_state.logged_in:
+        show_login()
+    else:
+        app_main()
+
+if __name__ == "__main__":
+    main()
         `;
-        await pyodide.runPythonAsync(pythonCode);
-        const result = pyodide.globals.get('result');
-        document.getElementById('result').innerText = `Apstrādāts teksts: ${result}`;
-      } catch (error) {
-        console.error(error);
-        document.getElementById('result').innerText = `Kļūda: ${error}`;
+        
+        stlite.mount({
+          code: code,
+          requirements: []  // Pievieno nepieciešamās bibliotēkas šeit, piemēram, ["pandas", "numpy"]
+        }, document.getElementById("app"));
       }
-    }
+    });
   </script>
 </body>
 </html>
