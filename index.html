@@ -2,32 +2,23 @@
 <html lang="lv">
 <head>
   <meta charset="UTF-8">
-  <title>Stlite Piemērs</title>
-  <!-- Iekļauj stlite bundli no CDN, kas satur Pyodide un Streamlit -->
-  <script src="https://unpkg.com/@stlite/mount/dist/index.js"></script>
-  <!-- Alternatīvi, ja pirmā saite nedarbojas:
-  <script src="https://cdn.jsdelivr.net/npm/@stlite/mount/dist/index.js"></script>
-  -->
+  <title>HELLO WORLD</title>
+  <style>
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background-color: #f0f0f0;
+    }
+    h1 {
+      color: #333;
+    }
+  </style>
 </head>
 <body>
-  <!-- Ietvars, kur tiks rādīta Streamlit lietotne -->
-  <div id="app"></div>
-  
-  <script>
-    const code = `
-import streamlit as st
-
-def main():
-    st.write("HELLO WORLD")
-
-if __name__ == "__main__":
-    main()
-    `;
-    
-    stlite.mount({
-      code: code,
-      requirements: []
-    }, document.getElementById("app"));
-  </script>
+  <h1>HELLO WORLD</h1>
 </body>
 </html>
