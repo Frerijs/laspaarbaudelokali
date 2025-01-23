@@ -1,7 +1,3 @@
-// app.js
-import * as THREE from './libs/threejs/three.module.js';
-import { LASLoader } from './libs/threejs/LASLoader.js';
-
 document.addEventListener('DOMContentLoaded', () => {
   const processBtn = document.getElementById('processBtn');
   const downloadCSVBtn = document.getElementById('downloadCSVBtn');
@@ -31,15 +27,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
   
-  // LAS failu parsēšana ar LASLoader
+  // LAS failu parsēšana ar LASParser
   async function parseLAS(file) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
-      reader.onload = async function(event) {
+      reader.onload = function(event) {
         try {
           const arrayBuffer = event.target.result;
-          const loader = new LASLoader();
-          const las = loader.parse(arrayBuffer);
+          const parser = new LASParser();
+          const las = parser.parse(arrayBuffer);
           const groundPoints = las.points.filter(p => p.classification === 2);
           const points = groundPoints.map(p => [p.x, p.y, p.z]);
           resolve(points);
@@ -215,7 +211,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (map) {
       map.remove();
     }
-    map = L.map('map').setView([56.95, 24.11], 13); // Vidējie Latvijas koordinātas
+    map = L.map('map').setView([56.95, 24.11], 13); // Vidējās Latvijas koordinātas
     
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OpenStreetMap'
