@@ -2,12 +2,13 @@
 <html lang="lv">
 <head>
   <meta charset="UTF-8">
-  <title>Stlite Piemērs - HELLO WORLD</title>
+  <title>HELLO WORLD ar Stlite</title>
   <!-- Iekļauj stlite bundli no jsDelivr CDN ar defer atribūtu -->
   <script src="https://cdn.jsdelivr.net/npm/@stlite/mount/dist/index.js" defer></script>
   <style>
     body {
       display: flex;
+      flex-direction: column;
       justify-content: center;
       align-items: center;
       height: 100vh;
@@ -17,11 +18,21 @@
     }
     #app {
       width: 80%;
-      height: 80%;
+      height: 60%;
+      margin-top: 20px;
+      border: 1px solid #ccc;
+      padding: 10px;
+      background-color: #fff;
+    }
+    h1 {
+      color: #333;
     }
   </style>
 </head>
 <body>
+  <!-- Statisk "HELLO WORLD" -->
+  <h1>HELLO WORLD</h1>
+  
   <!-- Ietvars, kur tiks rādīta Streamlit lietotne -->
   <div id="app"></div>
   
