@@ -15,9 +15,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     indexURL: "https://cdn.jsdelivr.net/pyodide/v0.23.4/full/"
   });
   console.log("Pyodide ielādēts.");
-
+  
   // Augšupielādē nepieciešamās Python pakotnes
-  await pyodide.loadPackage(['pandas', 'numpy', 'scipy']);
+  await pyodide.loadPackage(['pandas', 'numpy', 'scipy', 'laspy']);
   console.log("Pyodide pakotnes ielādētas.");
   
   // Krāsu klasifikācija
@@ -39,100 +39,58 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
   
-  // LAS failu parsēšana ar LAZ-perf
-  async function parseLAS(file) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = async function(event) {
-        try {
-          const arrayBuffer = event.target.result;
-          console.log("LAS faila dati ielādēti kā ArrayBuffer.");
-          
-          // Izmanto LAZ-perf, lai parsētu LAS failu
-          const laz = new LazPerf();
-          console.log("LAZ-perf instances izveidota.");
-  
-          const result = await laz.parse(arrayBuffer);
-          console.log("LAS fails veiksmīgi parsēts ar LAZ-perf.");
-          
-          // Filtrē zemes punktus (classification == 2)
-          const groundPoints = result.points.filter(p => p.classification === 2);
-          console.log(`Atrasti ${groundPoints.length} 'ground' punkti.`);
-          
-          const points = groundPoints.map(p => ({
-            x: p.x,
-            y: p.y,
-            z: p.z
-          }));
-          resolve(points);
-        } catch (error) {
-          console.error("Kļūda LAS faila parsēšanā ar LAZ-perf:", error);
-          reject("Kļūda LAS faila parsēšanā.");
-        }
-      };
-      reader.onerror = function() {
-        console.error("Kļūda LAS faila ielādēšanā.");
-        reject("Kļūda LAS faila ielādēšanā.");
-      };
-      reader.readAsArrayBuffer(file);
-    });
-  }
-  
-  // CSV failu parsēšana
-  function parseCSV(file) {
-    return new Promise((resolve, reject) => {
-      Papa.parse(file, {
-        header: true,
-        dynamicTyping: true,
-        complete: function(results) {
-          const data = results.data;
-          // Pārbaude, vai ir X, Y, Z kolonnas
-          if (data.length === 0 || (data.length === 1 && !data[0].x)) {
-            reject("CSV fails ir tukšs vai neatbilstošs.");
-            return;
-          }
-          const columns = Object.keys(data[0]).map(col => col.toLowerCase());
-          if (!columns.includes('x') || !columns.includes('y') || !columns.includes('z')) {
-            reject("CSV failam jāietver kolonnas X, Y un Z (jebkurā lieluma burta veidā).");
-          } else {
-            const points = data.map(row => ({
-              x: parseFloat(row.X) || parseFloat(row.x),
-              y: parseFloat(row.Y) || parseFloat(row.y),
-              z: parseFloat(row.Z) || parseFloat(row.z)
-            }));
-            resolve(points);
-          }
-        },
-        error: function(error) {
-          reject("Kļūda CSV faila parsēšanā: " + error.message);
-        }
-      });
-    });
-  }
-  
-  // KDBush indeksēšana
-  function buildLasTree(points) {
-    return new KDBush(points, p => p.x, p => p.y, 64, Float64Array);
-  }
-  
-  // Meklē tuvāko LAS punktu
-  function findNearestLasPoint(x, y, maxDistance) {
-    const radius = maxDistance;
-    const ids = lasTree.within(x, y, radius);
-    if (ids.length === 0) return null;
-    // Atrast tuvāko punktu
-    let minDist = Infinity;
-    let nearestPoint = null;
-    ids.forEach(id => {
-      const point = lasPoints[id];
-      const dist = Math.hypot(point.x - x, point.y - y);
-      if (dist < minDist) {
-        minDist = dist;
-        nearestPoint = point;
-      }
-    });
-    return nearestPoint;
-  }
+  // Python skripts, kas parsē LAS failu un salīdzina ar CSV
+  const pythonScript = `
+import pandas as pd
+import laspy
+from scipy.spatial import cKDTree
+import json
+
+def parse_las(las_bytes):
+    with laspy.open(fileobj=las_bytes) as las_file:
+        las = las_file.read()
+        ground_points = las.points[las.classification == 2]
+        las_df = pd.DataFrame({
+            'x': ground_points.x,
+            'y': ground_points.y,
+            'z': ground_points.z
+        })
+    return las_df
+
+def compare_points(las_df, csv_df, max_distance):
+    # Izveido KD koku no LAS punktiem
+    tree = cKDTree(las_df[['x', 'y']])
+    
+    # Meklē tuvākos LAS punktus CSV punktiem
+    distances, indices = tree.query(csv_df[['x', 'y']], distance_upper_bound=max_distance)
+    
+    # Sagatavo rezultātus
+    csv_df['las_x'] = las_df.loc[indices, 'x'].values
+    csv_df['las_y'] = las_df.loc[indices, 'y'].values
+    csv_df['las_z'] = las_df.loc[indices, 'z'].values
+    csv_df['z_diff_m'] = csv_df['z'] - csv_df['las_z']
+    
+    # Atzīmē punktus bez tuvākiem LAS punktiem
+    csv_df.loc[distances == float('inf'), ['las_x', 'las_y', 'las_z', 'z_diff_m']] = None
+    
+    return csv_df
+
+def process(las_bytes, csv_bytes, max_distance):
+    las_df = parse_las(las_bytes)
+    csv_df = pd.read_csv(csv_bytes)
+    
+    # Pārliecinās, ka CSV failam ir X, Y, Z kolonnas
+    csv_df = csv_df[['x', 'y', 'z']]
+    
+    result_df = compare_points(las_df, csv_df, max_distance)
+    
+    # Pārvērš rezultātu DataFrame uz JSON
+    return result_df.to_json(orient='records')
+`;
+
+  // Python funkcijas ielādēšana Pyodide
+  await pyodide.runPythonAsync(pythonScript);
+  console.log("Python skripts ielādēts.");
   
   // Apstrāde
   async function processFiles() {
@@ -148,67 +106,51 @@ document.addEventListener('DOMContentLoaded', async () => {
     const lasFile = lasFileInput.files[0];
     const csvFile = csvFileInput.files[0];
     
-    // Parsē LAS failu
+    // Nolasīt LAS failu kā ArrayBuffer
+    const lasArrayBuffer = await lasFile.arrayBuffer();
+    console.log("LAS faila dati ielādēti kā ArrayBuffer.");
+    
+    // Nolasīt CSV failu kā tekstu
+    const csvText = await csvFile.text();
+    console.log("CSV faila dati ielādēti kā teksts.");
+    
+    // Iegūt LAS faila bytes objekta
+    const lasBytes = pyodide.FS.writeFile('uploaded.las', new Uint8Array(lasArrayBuffer));
+    
+    // Izsaukt Python funkciju
     try {
-      lasPoints = await parseLAS(lasFile);
-      if (lasPoints.length === 0) {
-        alert("NAV atrasts neviens 'ground' punkts LAS failā.");
+      const resultJson = pyodide.runPython(`
+import io
+from process import process
+
+las_bytes = io.BytesIO(bytearray(FS.readFile('uploaded.las')))
+csv_bytes = io.StringIO("""${csvText.replace(/"/g, '\\"')}""")
+result = process(las_bytes, csv_bytes, ${maxDistance})
+result
+`);
+      console.log("Python funkcija izpildīta.");
+      
+      // Parsēt rezultātu JSON
+      resultPoints = JSON.parse(resultJson);
+      
+      if (resultPoints.length === 0) {
+        alert("Rezultātu nav atrasti.");
         return;
       }
-      lasTree = buildLasTree(lasPoints);
-      console.log("LAS punkti ielādēti un indeksēti.");
+      
+      // Rādīt rezultātus
+      displayResults();
+      
+      // Aktivizēt lejupielādes pogu
+      downloadCSVBtn.disabled = false;
+      
+      // Vizualizēt kartē
+      visualizeOnMap();
+      
     } catch (error) {
-      alert(error);
-      return;
+      console.error("Kļūda Python funkcijas izpildē:", error);
+      alert("Kļūda apstrādājot failus ar Python.");
     }
-    
-    // Parsē CSV failu
-    try {
-      csvPoints = await parseCSV(csvFile);
-      console.log("CSV punkti ielādēti.");
-    } catch (error) {
-      alert(error);
-      return;
-    }
-    
-    // Salīdzina punktus
-    resultPoints = csvPoints.map(csvPoint => {
-      const nearestLas = findNearestLasPoint(csvPoint.x, csvPoint.y, maxDistance);
-      if (nearestLas) {
-        const zDiff = csvPoint.z - nearestLas.z;
-        return {
-          csv_x: csvPoint.x,
-          csv_y: csvPoint.y,
-          csv_z: csvPoint.z,
-          las_x: nearestLas.x,
-          las_y: nearestLas.y,
-          las_z: nearestLas.z,
-          z_diff_m: zDiff
-        };
-      } else {
-        return {
-          csv_x: csvPoint.x,
-          csv_y: csvPoint.y,
-          csv_z: csvPoint.z,
-          las_x: null,
-          las_y: null,
-          las_z: null,
-          z_diff_m: null
-        };
-      }
-    });
-    
-    // Izsauc Python funkciju, lai veiktu detalizētāku salīdzināšanu (ja nepieciešams)
-    // Šajā gadījumā salīdzināšana notiek JavaScript pusē
-    
-    // Rādīt rezultātus
-    displayResults();
-    
-    // Aktivizēt lejupielādes pogu
-    downloadCSVBtn.disabled = false;
-    
-    // Vizualizēt kartē
-    visualizeOnMap();
   }
   
   // Rezultātu rādīšana
@@ -223,9 +165,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     let tableHTML = "<table><tr><th>CSV X</th><th>CSV Y</th><th>CSV Z</th><th>LAS X</th><th>LAS Y</th><th>LAS Z</th><th>Z_diff (m)</th></tr>";
     resultPoints.forEach(pt => {
       tableHTML += `<tr>
-        <td>${pt.csv_x.toFixed(3)}</td>
-        <td>${pt.csv_y.toFixed(3)}</td>
-        <td>${pt.csv_z.toFixed(3)}</td>
+        <td>${pt.csv_x !== null ? pt.csv_x.toFixed(3) : 'NAV'}</td>
+        <td>${pt.csv_y !== null ? pt.csv_y.toFixed(3) : 'NAV'}</td>
+        <td>${pt.csv_z !== null ? pt.csv_z.toFixed(3) : 'NAV'}</td>
         <td>${pt.las_x !== null ? pt.las_x.toFixed(3) : 'NAV'}</td>
         <td>${pt.las_y !== null ? pt.las_y.toFixed(3) : 'NAV'}</td>
         <td>${pt.las_z !== null ? pt.las_z.toFixed(3) : 'NAV'}</td>
@@ -264,9 +206,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   function downloadCSV() {
     const headers = ["CSV_X", "CSV_Y", "CSV_Z", "LAS_X", "LAS_Y", "LAS_Z", "Z_diff"];
     const rows = resultPoints.map(pt => [
-      pt.csv_x.toFixed(3),
-      pt.csv_y.toFixed(3),
-      pt.csv_z.toFixed(3),
+      pt.csv_x !== null ? pt.csv_x.toFixed(3) : '',
+      pt.csv_y !== null ? pt.csv_y.toFixed(3) : '',
+      pt.csv_z !== null ? pt.csv_z.toFixed(3) : '',
       pt.las_x !== null ? pt.las_x.toFixed(3) : '',
       pt.las_y !== null ? pt.las_y.toFixed(3) : '',
       pt.las_z !== null ? pt.las_z.toFixed(3) : '',
