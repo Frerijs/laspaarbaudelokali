@@ -1,3 +1,5 @@
+// app.js
+
 document.addEventListener('DOMContentLoaded', () => {
   const processBtn = document.getElementById('processBtn');
   const downloadCSVBtn = document.getElementById('downloadCSVBtn');
@@ -27,15 +29,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
   
-  // LAS failu parsēšana ar LASParser
+  // LAS failu parsēšana ar LASLoader
   async function parseLAS(file) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = function(event) {
         try {
           const arrayBuffer = event.target.result;
-          const parser = new LASParser();
-          const las = parser.parse(arrayBuffer);
+          const loader = new LASLoader();
+          const las = loader.parse(arrayBuffer);
           const groundPoints = las.points.filter(p => p.classification === 2);
           const points = groundPoints.map(p => [p.x, p.y, p.z]);
           resolve(points);
