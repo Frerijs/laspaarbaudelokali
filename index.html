@@ -2,9 +2,52 @@
 <html lang="lv">
 <head>
   <meta charset="UTF-8">
-  <title>HELLO WORLD</title>
+  <title>Stlite Piemērs - HELLO WORLD</title>
+  <!-- Iekļauj stlite bundli no jsDelivr CDN ar defer atribūtu -->
+  <script src="https://cdn.jsdelivr.net/npm/@stlite/mount/dist/index.js" defer></script>
+  <style>
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background-color: #f0f0f0;
+    }
+    #app {
+      width: 80%;
+      height: 80%;
+    }
+  </style>
 </head>
 <body>
-  <h1>HELLO WORLD</h1>
+  <!-- Ietvars, kur tiks rādīta Streamlit lietotne -->
+  <div id="app"></div>
+  
+  <script>
+    // Pārliecinies, ka stlite ir ielādēts pirms izsauc stlite.mount
+    window.addEventListener('load', () => {
+      if (typeof stlite === 'undefined') {
+        console.error("stlite ir neizsaukts. Pārbaudi CDN saiti.");
+      } else {
+        const code = `
+import streamlit as st
+
+def main():
+    st.title("Sveiki no Stlite!")
+    st.write("HELLO WORLD")
+
+if __name__ == "__main__":
+    main()
+        `;
+        
+        stlite.mount({
+          code: code,
+          requirements: []  // Pievieno nepieciešamās bibliotēkas šeit, piemēram, ["pandas", "numpy"]
+        }, document.getElementById("app"));
+      }
+    });
+  </script>
 </body>
 </html>
