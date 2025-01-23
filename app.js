@@ -39,7 +39,8 @@ document.addEventListener('DOMContentLoaded', () => {
           const points = groundPoints.map(p => [p.x, p.y, p.z]);
           resolve(points);
         } catch (error) {
-          reject("Kļūda LAS faila parsēšanā: " + error);
+          console.error(error);
+          reject("Kļūda LAS faila parsēšanā.");
         }
       };
       reader.onerror = function() {
@@ -58,8 +59,8 @@ document.addEventListener('DOMContentLoaded', () => {
         complete: function(results) {
           const data = results.data;
           // Pārbaude, vai ir X, Y, Z kolonnas
-          if (data.length === 0) {
-            reject("CSV fails ir tukšs.");
+          if (data.length === 0 || (data.length === 1 && !data[0].x)) {
+            reject("CSV fails ir tukšs vai neatbilstošs.");
             return;
           }
           const columns = Object.keys(data[0]).map(col => col.toLowerCase());
@@ -67,15 +68,15 @@ document.addEventListener('DOMContentLoaded', () => {
             reject("CSV failam jāietver kolonnas X, Y un Z (jebkurā lieluma burta veidā).");
           } else {
             const points = data.map(row => ({
-              x: row.X || row.x,
-              y: row.Y || row.y,
-              z: row.Z || row.z
+              x: parseFloat(row.X) || parseFloat(row.x),
+              y: parseFloat(row.Y) || parseFloat(row.y),
+              z: parseFloat(row.Z) || parseFloat(row.z)
             }));
             resolve(points);
           }
         },
         error: function(error) {
-          reject("Kļūda CSV faila parsēšanā: " + error);
+          reject("Kļūda CSV faila parsēšanā: " + error.message);
         }
       });
     });
