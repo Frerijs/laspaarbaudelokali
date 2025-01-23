@@ -1,74 +1,10 @@
-a<!DOCTYPE html>
-<html lang="lv">
-<head>
-  <meta charset="UTF-8">
-  <title>LAS-CSV Salīdzināšana</title>
-  <link rel="stylesheet" href="styles.css">
-  <!-- Leaflet CSS (Noņemts integrity atribūts) -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
-</head>
-<body>
-  <div id="container">
-    <h1>LAS-CSV Salīdzināšana</h1>
-    
-    <!-- Failu augšupielāde -->
-    <div class="uploader">
-      <label for="lasFile">Augšupielādē .las/.laz failu:</label>
-      <input type="file" id="lasFile" accept=".las,.laz">
-    </div>
-    
-    <div class="uploader">
-      <label for="csvFile">Augšupielādē .csv failu:</label>
-      <input type="file" id="csvFile" accept=".csv">
-    </div>
-    
-    <!-- Maksimālais attālums -->
-    <div class="input-group">
-      <label for="maxDistance">Maksimālais attālums (m):</label>
-      <input type="number" id="maxDistance" value="0.2" step="0.1" min="0">
-    </div>
-    
-    <!-- Apstrādes poga -->
-    <button id="processBtn">Apstrādāt</button>
-    
-    <!-- Rezultātu sadaļa -->
-    <div id="results"></div>
-    
-    <!-- Kartes vizualizācija (Opcionāli) -->
-    <div id="map"></div>
-    
-    <!-- Lejupielādes pogas -->
-    <div class="download-buttons">
-      <button id="downloadCSVBtn" disabled>Lejupielādēt Rezultātu CSV</button>
-    </div>
-  </div>
-  
-  <!-- Leaflet JS (Noņemts integrity atribūts) -->
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
-  
-  <!-- PapaParse (Noņemts integrity atribūts) -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-  
-  <!-- Las.js (Nav SRI) -->
-  <script src="https://unpkg.com/las.js@1.0.3/build/las.min.js"></script>
-  
-  <!-- kdbush (Nav SRI) -->
-  <script src="https://unpkg.com/kdbush@3.0.0/kdbush.min.js"></script>
-  
-  <!-- FileSaver.js (Noņemts integrity atribūts) -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-  
-  <!-- Galvenais JS fails -->
-  <script src="app.js"></script>
-</body>
-</html>
 <!DOCTYPE html>
 <html lang="lv">
 <head>
   <meta charset="UTF-8">
   <title>LAS-CSV Salīdzināšana</title>
   <link rel="stylesheet" href="styles.css">
-  <!-- Leaflet CSS (Noņemts integrity atribūts) -->
+  <!-- Leaflet CSS bez integrity -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
 </head>
 <body>
@@ -98,7 +34,7 @@ a<!DOCTYPE html>
     <!-- Rezultātu sadaļa -->
     <div id="results"></div>
     
-    <!-- Kartes vizualizācija (Opcionāli) -->
+    <!-- Kartes vizualizācija -->
     <div id="map"></div>
     
     <!-- Lejupielādes pogas -->
@@ -107,19 +43,19 @@ a<!DOCTYPE html>
     </div>
   </div>
   
-  <!-- Leaflet JS (Noņemts integrity atribūts) -->
+  <!-- Leaflet JS bez integrity -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   
-  <!-- PapaParse (Noņemts integrity atribūts) -->
+  <!-- PapaParse bez integrity -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   
-  <!-- Las.js (Nav SRI) -->
+  <!-- Las.js bez integrity -->
   <script src="https://unpkg.com/las.js@1.0.3/build/las.min.js"></script>
   
-  <!-- kdbush (Nav SRI) -->
+  <!-- kdbush bez integrity -->
   <script src="https://unpkg.com/kdbush@3.0.0/kdbush.min.js"></script>
   
-  <!-- FileSaver.js (Noņemts integrity atribūts) -->
+  <!-- FileSaver.js bez integrity -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   
   <!-- Galvenais JS fails -->
