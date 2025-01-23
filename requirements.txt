@@ -1,8 +1,0 @@
-requests
-laspy
-pandas
-numpy
-scipy
-pydeck
-pyproj
-ezdxf
