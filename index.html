@@ -2,27 +2,39 @@
 <html lang="lv">
 <head>
   <meta charset="UTF-8">
-  <title>Stlite Piemērs</title>
-  <!-- Iekļauj stlite bundli no CDN, kas satur Pyodide un Streamlit -->
+  <title>Stlite Piemērs ar Autentifikāciju</title>
   <script src="https://unpkg.com/@stlite/mount/dist/index.js"></script>
 </head>
 <body>
-  <!-- Ietvars, kur tiks rādīta Streamlit lietotne -->
   <div id="app"></div>
   
   <script>
     const code = `
 import streamlit as st
 
+def authenticate(username, password):
+    # Vienkārša autentifikācijas pārbaude
+    if username == "test" and password == "test":
+        return True
+    return False
+
+def login():
+    username = st.text_input("Lietotājvārds")
+    password = st.text_input("Parole", type="password")
+    if st.button("Pieslēgties"):
+        if authenticate(username, password):
+            st.success("Autentifikācija veiksmīga!")
+        else:
+            st.error("Nepareizs lietotājvārds vai parole.")
+
 def main():
-    st.title("Sveiki no stlite!")
-    st.write("Šis ir vienkāršs stlite piemērs.")
+    st.title("Autentifikācijas Piemērs")
+    login()
 
 if __name__ == "__main__":
     main()
     `;
     
-    // Izmantojam stlite.mount, lai palaistu Pyodide + tavu Python kodu pārlūkā
     stlite.mount({
       code: code,
       requirements: []
