@@ -2,9 +2,7 @@
 <html lang="lv">
 <head>
   <meta charset="UTF-8">
-  <title>HELLO WORLD ar Stlite</title>
-  <!-- Iekļauj stlite bundli no jsDelivr CDN ar defer atribūtu -->
-  <script src="https://cdn.jsdelivr.net/npm/@stlite/mount/dist/index.js" defer></script>
+  <title>Datuma Apstrāde ar JavaScript</title>
   <style>
     body {
       display: flex;
@@ -17,48 +15,40 @@
       background-color: #f0f0f0;
     }
     #app {
-      width: 80%;
-      height: 60%;
-      margin-top: 20px;
-      border: 1px solid #ccc;
-      padding: 10px;
+      width: 300px;
+      padding: 20px;
       background-color: #fff;
+      border: 1px solid #ccc;
+      border-radius: 5px;
     }
-    h1 {
+    input, button {
+      width: 100%;
+      padding: 10px;
+      margin: 5px 0;
+      font-size: 16px;
+    }
+    #result {
+      margin-top: 20px;
+      font-weight: bold;
       color: #333;
     }
   </style>
 </head>
 <body>
-  <!-- Statisk "HELLO WORLD" -->
-  <h1>HELLO WORLD</h1>
-  
-  <!-- Ietvars, kur tiks rādīta Streamlit lietotne -->
-  <div id="app"></div>
-  
+  <div id="app">
+    <h2>Teksta Apstrāde</h2>
+    <input type="text" id="userInput" placeholder="Ievadi tekstu">
+    <button onclick="processInput()">Apstrādāt</button>
+    <div id="result"></div>
+  </div>
+
   <script>
-    // Pārliecinies, ka stlite ir ielādēts pirms izsauc stlite.mount
-    window.addEventListener('load', () => {
-      if (typeof stlite === 'undefined') {
-        console.error("stlite ir neizsaukts. Pārbaudi CDN saiti.");
-      } else {
-        const code = `
-import streamlit as st
-
-def main():
-    st.title("Sveiki no Stlite!")
-    st.write("HELLO WORLD")
-
-if __name__ == "__main__":
-    main()
-        `;
-        
-        stlite.mount({
-          code: code,
-          requirements: []  // Pievieno nepieciešamās bibliotēkas šeit, piemēram, ["pandas", "numpy"]
-        }, document.getElementById("app"));
-      }
-    });
+    function processInput() {
+      const input = document.getElementById('userInput').value;
+      // Vienkārša apstrāde: pārvērst tekstu uz lielajiem burtiem
+      const processed = input.toUpperCase();
+      document.getElementById('result').innerText = `Apstrādāts teksts: ${processed}`;
+    }
   </script>
 </body>
 </html>
