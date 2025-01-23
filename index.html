@@ -2,24 +2,24 @@
 <html lang="lv">
 <head>
   <meta charset="UTF-8">
-  <title>LAS vs CSV Salīdzināšana</title>
+  <title>CSV Salīdzināšana</title>
   <link rel="stylesheet" href="styles.css">
   <!-- Leaflet CSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
 </head>
 <body>
   <div id="container">
-    <h1>LAS vs CSV Salīdzināšana</h1>
+    <h1>CSV Salīdzināšana</h1>
     
     <!-- Failu augšupielāde -->
     <div class="uploader">
-      <label for="lasFile">Augšupielādē .las/.laz failu:</label>
-      <input type="file" id="lasFile" accept=".las,.laz">
+      <label for="csvFile1">Augšupielādē pirmo .csv failu (Oriģinālais):</label>
+      <input type="file" id="csvFile1" accept=".csv">
     </div>
     
     <div class="uploader">
-      <label for="csvFile">Augšupielādē .csv failu:</label>
-      <input type="file" id="csvFile" accept=".csv">
+      <label for="csvFile2">Augšupielādē otro .csv failu (LAS konvertēts):</label>
+      <input type="file" id="csvFile2" accept=".csv">
     </div>
     
     <!-- Maksimālais attālums -->
@@ -28,8 +28,8 @@
       <input type="number" id="maxDistance" value="0.2" step="0.1" min="0">
     </div>
     
-    <!-- Apstrādes poga -->
-    <button id="processBtn">Apstrādāt</button>
+    <!-- Apstrādes pogas -->
+    <button id="processBtn">Salīdzināt</button>
     
     <!-- Rezultātu sadaļa -->
     <div id="results"></div>
@@ -54,9 +54,6 @@
   
   <!-- FileSaver.js -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-  
-  <!-- laz-perf Skripts -->
-  <script src="libs/laz-perf/laz-perf.js"></script>
   
   <!-- Galvenais JS fails -->
   <script src="app.js"></script>
