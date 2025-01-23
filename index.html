@@ -4,10 +4,8 @@
   <meta charset="UTF-8">
   <title>LAS-CSV Salīdzināšana</title>
   <link rel="stylesheet" href="styles.css">
-  <!-- Leaflet CSS (Opcionāli, ja vēlaties kartes vizualizāciju) -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    integrity="sha256-sA+eY2g1XmrXm3Q5S57rKlfXfrwUzJj2KQ0nKf8+oik="
-    crossorigin=""/>
+  <!-- Leaflet CSS (Noņemts integrity atribūts) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
 </head>
 <body>
   <div id="container">
@@ -45,26 +43,20 @@
     </div>
   </div>
   
-  <!-- Leaflet JS (Opcionāli) -->
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-    integrity="sha256-o9N1j8kC7fNjS09VYVMRF48IG4Jp0GtC1hV+kP+UJtk="
-    crossorigin=""></script>
+  <!-- Leaflet JS (Noņemts integrity atribūts) -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   
-  <!-- PapaParse -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"
-    integrity="sha512-5CQ4HVP4Mlv7cPGpK8OiyEmXU3t4TtYivsaSnRr2sE8PJhtCxn+BGam6I36qRr10sY+iBXleBw8M+SrfONm6Kg=="
-    crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <!-- PapaParse (Noņemts integrity atribūts) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   
-  <!-- Las.js -->
+  <!-- Las.js (Nav SRI) -->
   <script src="https://unpkg.com/las.js@1.0.3/build/las.min.js"></script>
   
-  <!-- kdbush -->
+  <!-- kdbush (Nav SRI) -->
   <script src="https://unpkg.com/kdbush@3.0.0/kdbush.min.js"></script>
   
-  <!-- FileSaver.js -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"
-    integrity="sha512-T6hv1UoNgIaVPiLYKqju8FGAXOqlOQieYv1vFJgIyy8OKvE9XwKkbQx5qzvZj6L8vI/ImUHU8JbYVv1Xr8yE2g=="
-    crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <!-- FileSaver.js (Noņemts integrity atribūts) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   
   <!-- Galvenais JS fails -->
   <script src="app.js"></script>
