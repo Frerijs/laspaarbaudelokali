@@ -29,17 +29,23 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
   
-  // LAS failu parsēšana ar LASLoader
+  // LAS failu parsēšana ar LAZ-perf
   async function parseLAS(file) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
-      reader.onload = function(event) {
+      reader.onload = async function(event) {
         try {
           const arrayBuffer = event.target.result;
-          const loader = new LASLoader();
-          const las = loader.parse(arrayBuffer);
-          const groundPoints = las.points.filter(p => p.classification === 2);
-          const points = groundPoints.map(p => [p.x, p.y, p.z]);
+          // Izmantojiet LAZ-perf, lai parsētu LAS failu
+          const laz = new LazPerf();
+          const result = await laz.parse(arrayBuffer);
+          // Filtrējiet zemes punktus (classification == 2)
+          const groundPoints = result.points.filter(p => p.classification === 2);
+          const points = groundPoints.map(p => ({
+            x: p.x,
+            y: p.y,
+            z: p.z
+          }));
           resolve(points);
         } catch (error) {
           console.error(error);
@@ -87,7 +93,7 @@ document.addEventListener('DOMContentLoaded', () => {
   
   // KDBush indeksēšana
   function buildLasTree(points) {
-    return new KDBush(points, p => p[0], p => p[1], 64, Float64Array);
+    return new KDBush(points, p => p.x, p => p.y, 64, Float64Array);
   }
   
   // Meklē tuvāko LAS punktu
@@ -100,7 +106,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let nearestPoint = null;
     ids.forEach(id => {
       const point = lasPoints[id];
-      const dist = Math.hypot(point[0] - x, point[1] - y);
+      const dist = Math.hypot(point.x - x, point.y - y);
       if (dist < minDist) {
         minDist = dist;
         nearestPoint = point;
@@ -116,7 +122,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const maxDistance = parseFloat(document.getElementById('maxDistance').value);
     
     if (lasFileInput.files.length === 0 || csvFileInput.files.length === 0) {
-      alert("Lūdzu, augšupielādējiet gan LAS, gan CSV failus.");
+      alert("Lūdzu, augšupielādējiet abus failus.");
       return;
     }
     
@@ -150,14 +156,14 @@ document.addEventListener('DOMContentLoaded', () => {
     resultPoints = csvPoints.map(csvPoint => {
       const nearestLas = findNearestLasPoint(csvPoint.x, csvPoint.y, maxDistance);
       if (nearestLas) {
-        const zDiff = csvPoint.z - nearestLas[2];
+        const zDiff = csvPoint.z - nearestLas.z;
         return {
           csv_x: csvPoint.x,
           csv_y: csvPoint.y,
           csv_z: csvPoint.z,
-          las_x: nearestLas[0],
-          las_y: nearestLas[1],
-          las_z: nearestLas[2],
+          las_x: nearestLas.x,
+          las_y: nearestLas.y,
+          las_z: nearestLas.z,
           z_diff_m: zDiff
         };
       } else {
