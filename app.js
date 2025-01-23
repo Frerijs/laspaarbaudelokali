@@ -2,10 +2,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const processBtn = document.getElementById('processBtn');
   const downloadCSVBtn = document.getElementById('downloadCSVBtn');
   
-  let csvPoints1 = [];
-  let csvPoints2 = [];
+  let lasPoints = [];
+  let csvPoints = [];
   let resultPoints = [];
-  let csvTree = null;
+  let lasTree = null;
   let map = null;
   
   // Krāsu klasifikācija
@@ -25,6 +25,29 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
       return 'purple';
     }
+  }
+  
+  // LAS failu parsēšana ar laz-perf
+  async function parseLAS(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = async function(event) {
+        try {
+          const arrayBuffer = event.target.result;
+          const las = await lazPerf.parseLAS(arrayBuffer);
+          const groundPoints = las.points.filter(p => p.classification === 2);
+          const points = groundPoints.map(p => [p.x, p.y, p.z]);
+          resolve(points);
+        } catch (error) {
+          console.error(error);
+          reject("Kļūda LAS faila parsēšanā.");
+        }
+      };
+      reader.onerror = function() {
+        reject("Kļūda LAS faila ielādēšanā.");
+      };
+      reader.readAsArrayBuffer(file);
+    });
   }
   
   // CSV failu parsēšana
@@ -60,21 +83,21 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   
   // KDBush indeksēšana
-  function buildCsvTree(points) {
-    return new KDBush(points, p => p.x, p => p.y, 64, Float64Array);
+  function buildLasTree(points) {
+    return new KDBush(points, p => p[0], p => p[1], 64, Float64Array);
   }
   
-  // Meklē tuvāko CSV punktu
-  function findNearestCsvPoint(x, y, maxDistance) {
+  // Meklē tuvāko LAS punktu
+  function findNearestLasPoint(x, y, maxDistance) {
     const radius = maxDistance;
-    const ids = csvTree.within(x, y, radius);
+    const ids = lasTree.within(x, y, radius);
     if (ids.length === 0) return null;
     // Atrast tuvāko punktu
     let minDist = Infinity;
     let nearestPoint = null;
     ids.forEach(id => {
-      const point = csvPoints1[id];
-      const dist = Math.hypot(point.x - x, point.y - y);
+      const point = lasPoints[id];
+      const dist = Math.hypot(point[0] - x, point[1] - y);
       if (dist < minDist) {
         minDist = dist;
         nearestPoint = point;
@@ -85,67 +108,63 @@ document.addEventListener('DOMContentLoaded', () => {
   
   // Apstrāde
   async function processFiles() {
-    const csvFileInput1 = document.getElementById('csvFile1');
-    const csvFileInput2 = document.getElementById('csvFile2');
+    const lasFileInput = document.getElementById('lasFile');
+    const csvFileInput = document.getElementById('csvFile');
     const maxDistance = parseFloat(document.getElementById('maxDistance').value);
     
-    if (csvFileInput1.files.length === 0 || csvFileInput2.files.length === 0) {
-      alert("Lūdzu, augšupielādējiet abus CSV failus.");
+    if (lasFileInput.files.length === 0 || csvFileInput.files.length === 0) {
+      alert("Lūdzu, augšupielādējiet gan LAS, gan CSV failus.");
       return;
     }
     
-    const csvFile1 = csvFileInput1.files[0];
-    const csvFile2 = csvFileInput2.files[0];
+    const lasFile = lasFileInput.files[0];
+    const csvFile = csvFileInput.files[0];
     
-    // Parsē pirmo CSV failu (Oriģinālais)
+    // Parsē LAS failu
     try {
-      csvPoints1 = await parseCSV(csvFile1);
-      if (csvPoints1.length === 0) {
-        alert("Pirmajā CSV failā nav punktu.");
+      lasPoints = await parseLAS(lasFile);
+      if (lasPoints.length === 0) {
+        alert("NAV atrasts neviens 'ground' punkts LAS failā.");
         return;
       }
-      csvTree = buildCsvTree(csvPoints1);
-      console.log("Pirmais CSV fails ielādēts un indeksēts.");
+      lasTree = buildLasTree(lasPoints);
+      console.log("LAS punkti ielādēti un indeksēti.");
     } catch (error) {
       alert(error);
       return;
     }
     
-    // Parsē otro CSV failu (LAS konvertēts)
+    // Parsē CSV failu
     try {
-      csvPoints2 = await parseCSV(csvFile2);
-      if (csvPoints2.length === 0) {
-        alert("Otrajā CSV failā nav punktu.");
-        return;
-      }
-      console.log("Otrais CSV fails ielādēts.");
+      csvPoints = await parseCSV(csvFile);
+      console.log("CSV punkti ielādēti.");
     } catch (error) {
       alert(error);
       return;
     }
     
     // Salīdzina punktus
-    resultPoints = csvPoints2.map(csvPoint => {
-      const nearestCsv = findNearestCsvPoint(csvPoint.x, csvPoint.y, maxDistance);
-      if (nearestCsv) {
-        const zDiff = csvPoint.z - nearestCsv.z;
+    resultPoints = csvPoints.map(csvPoint => {
+      const nearestLas = findNearestLasPoint(csvPoint.x, csvPoint.y, maxDistance);
+      if (nearestLas) {
+        const zDiff = csvPoint.z - nearestLas[2];
         return {
-          csv1_x: nearestCsv.x,
-          csv1_y: nearestCsv.y,
-          csv1_z: nearestCsv.z,
-          csv2_x: csvPoint.x,
-          csv2_y: csvPoint.y,
-          csv2_z: csvPoint.z,
+          csv_x: csvPoint.x,
+          csv_y: csvPoint.y,
+          csv_z: csvPoint.z,
+          las_x: nearestLas[0],
+          las_y: nearestLas[1],
+          las_z: nearestLas[2],
           z_diff_m: zDiff
         };
       } else {
         return {
-          csv1_x: null,
-          csv1_y: null,
-          csv1_z: null,
-          csv2_x: csvPoint.x,
-          csv2_y: csvPoint.y,
-          csv2_z: csvPoint.z,
+          csv_x: csvPoint.x,
+          csv_y: csvPoint.y,
+          csv_z: csvPoint.z,
+          las_x: null,
+          las_y: null,
+          las_z: null,
           z_diff_m: null
         };
       }
@@ -170,15 +189,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     // Izveido tabulu
-    let tableHTML = "<table><tr><th>CSV1 X</th><th>CSV1 Y</th><th>CSV1 Z</th><th>CSV2 X</th><th>CSV2 Y</th><th>CSV2 Z</th><th>Z_diff (m)</th></tr>";
+    let tableHTML = "<table><tr><th>CSV X</th><th>CSV Y</th><th>CSV Z</th><th>LAS X</th><th>LAS Y</th><th>LAS Z</th><th>Z_diff (m)</th></tr>";
     resultPoints.forEach(pt => {
       tableHTML += `<tr>
-        <td>${pt.csv1_x !== null ? pt.csv1_x.toFixed(3) : 'NAV'}</td>
-        <td>${pt.csv1_y !== null ? pt.csv1_y.toFixed(3) : 'NAV'}</td>
-        <td>${pt.csv1_z !== null ? pt.csv1_z.toFixed(3) : 'NAV'}</td>
-        <td>${pt.csv2_x.toFixed(3)}</td>
-        <td>${pt.csv2_y.toFixed(3)}</td>
-        <td>${pt.csv2_z.toFixed(3)}</td>
+        <td>${pt.csv_x.toFixed(3)}</td>
+        <td>${pt.csv_y.toFixed(3)}</td>
+        <td>${pt.csv_z.toFixed(3)}</td>
+        <td>${pt.las_x !== null ? pt.las_x.toFixed(3) : 'NAV'}</td>
+        <td>${pt.las_y !== null ? pt.las_y.toFixed(3) : 'NAV'}</td>
+        <td>${pt.las_z !== null ? pt.las_z.toFixed(3) : 'NAV'}</td>
         <td>${pt.z_diff_m !== null ? pt.z_diff_m.toFixed(3) : 'NAV'}</td>
       </tr>`;
     });
@@ -198,9 +217,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }).addTo(map);
     
     resultPoints.forEach(pt => {
-      if (pt.csv1_x !== null && pt.csv1_y !== null) {
+      if (pt.las_x !== null && pt.las_y !== null) {
         const color = classifyZDiff(pt.z_diff_m);
-        L.circleMarker([pt.csv1_y, pt.csv1_x], { // Leaflet izmanto [lat, lon]
+        L.circleMarker([pt.las_y, pt.las_x], { // Leaflet izmanto [lat, lon]
           radius: 5,
           color: color,
           fillColor: color,
@@ -212,14 +231,14 @@ document.addEventListener('DOMContentLoaded', () => {
   
   // Lejupielādēt rezultātus kā CSV
   function downloadCSV() {
-    const headers = ["CSV1_X", "CSV1_Y", "CSV1_Z", "CSV2_X", "CSV2_Y", "CSV2_Z", "Z_diff"];
+    const headers = ["CSV_X", "CSV_Y", "CSV_Z", "LAS_X", "LAS_Y", "LAS_Z", "Z_diff_m"];
     const rows = resultPoints.map(pt => [
-      pt.csv1_x !== null ? pt.csv1_x.toFixed(3) : '',
-      pt.csv1_y !== null ? pt.csv1_y.toFixed(3) : '',
-      pt.csv1_z !== null ? pt.csv1_z.toFixed(3) : '',
-      pt.csv2_x.toFixed(3),
-      pt.csv2_y.toFixed(3),
-      pt.csv2_z.toFixed(3),
+      pt.csv_x.toFixed(3),
+      pt.csv_y.toFixed(3),
+      pt.csv_z.toFixed(3),
+      pt.las_x !== null ? pt.las_x.toFixed(3) : '',
+      pt.las_y !== null ? pt.las_y.toFixed(3) : '',
+      pt.las_z !== null ? pt.las_z.toFixed(3) : '',
       pt.z_diff_m !== null ? pt.z_diff_m.toFixed(3) : ''
     ]);
     
