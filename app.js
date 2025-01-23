@@ -1,6 +1,6 @@
 // app.js
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   const processBtn = document.getElementById('processBtn');
   const downloadCSVBtn = document.getElementById('downloadCSVBtn');
   
@@ -9,6 +9,16 @@ document.addEventListener('DOMContentLoaded', () => {
   let resultPoints = [];
   let lasTree = null;
   let map = null;
+  
+  // Inicializē Pyodide
+  const pyodide = await loadPyodide({
+    indexURL: "https://cdn.jsdelivr.net/pyodide/v0.23.4/full/"
+  });
+  console.log("Pyodide ielādēts.");
+
+  // Augšupielādē nepieciešamās Python pakotnes
+  await pyodide.loadPackage(['pandas', 'numpy', 'scipy']);
+  console.log("Pyodide pakotnes ielādētas.");
   
   // Krāsu klasifikācija
   function classifyZDiff(z) {
@@ -36,11 +46,19 @@ document.addEventListener('DOMContentLoaded', () => {
       reader.onload = async function(event) {
         try {
           const arrayBuffer = event.target.result;
-          // Izmantojiet LAZ-perf, lai parsētu LAS failu
+          console.log("LAS faila dati ielādēti kā ArrayBuffer.");
+          
+          // Izmanto LAZ-perf, lai parsētu LAS failu
           const laz = new LazPerf();
+          console.log("LAZ-perf instances izveidota.");
+  
           const result = await laz.parse(arrayBuffer);
-          // Filtrējiet zemes punktus (classification == 2)
+          console.log("LAS fails veiksmīgi parsēts ar LAZ-perf.");
+          
+          // Filtrē zemes punktus (classification == 2)
           const groundPoints = result.points.filter(p => p.classification === 2);
+          console.log(`Atrasti ${groundPoints.length} 'ground' punkti.`);
+          
           const points = groundPoints.map(p => ({
             x: p.x,
             y: p.y,
@@ -48,11 +66,12 @@ document.addEventListener('DOMContentLoaded', () => {
           }));
           resolve(points);
         } catch (error) {
-          console.error(error);
+          console.error("Kļūda LAS faila parsēšanā ar LAZ-perf:", error);
           reject("Kļūda LAS faila parsēšanā.");
         }
       };
       reader.onerror = function() {
+        console.error("Kļūda LAS faila ielādēšanā.");
         reject("Kļūda LAS faila ielādēšanā.");
       };
       reader.readAsArrayBuffer(file);
@@ -179,6 +198,9 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
     
+    // Izsauc Python funkciju, lai veiktu detalizētāku salīdzināšanu (ja nepieciešams)
+    // Šajā gadījumā salīdzināšana notiek JavaScript pusē
+    
     // Rādīt rezultātus
     displayResults();
     
@@ -260,9 +282,9 @@ document.addEventListener('DOMContentLoaded', () => {
     saveAs(blob, "z_diff_results.csv");
   }
   
-  // Pievieno apstrādes pogas notikumu klausītāju
+  // Pievieno Apstrādes Pogas Notikumu Klausītāju
   processBtn.addEventListener('click', processFiles);
   
-  // Pievieno lejupielādes pogas notikumu klausītāju
+  // Pievieno Lejupielādes Pogas Notikumu Klausītāju
   downloadCSVBtn.addEventListener('click', downloadCSV);
 });
