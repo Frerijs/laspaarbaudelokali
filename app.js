@@ -97,7 +97,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const csvFile1 = csvFileInput1.files[0];
     const csvFile2 = csvFileInput2.files[0];
     
-    // Parsē pirmo CSV failu
+    // Parsē pirmo CSV failu (Oriģinālais)
     try {
       csvPoints1 = await parseCSV(csvFile1);
       if (csvPoints1.length === 0) {
@@ -111,7 +111,7 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
     
-    // Parsē otro CSV failu
+    // Parsē otro CSV failu (LAS konvertēts)
     try {
       csvPoints2 = await parseCSV(csvFile2);
       if (csvPoints2.length === 0) {
