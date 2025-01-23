@@ -2,7 +2,7 @@
 <html lang="lv">
 <head>
   <meta charset="UTF-8">
-  <title>Datuma Apstrāde ar JavaScript</title>
+  <title>Datuma Apstrāde ar Pyodide</title>
   <style>
     body {
       display: flex;
@@ -33,21 +33,52 @@
       color: #333;
     }
   </style>
+  <!-- Iekļauj Pyodide no CDN -->
+  <script src="https://cdn.jsdelivr.net/pyodide/v0.23.4/full/pyodide.js"></script>
 </head>
 <body>
   <div id="app">
-    <h2>Teksta Apstrāde</h2>
+    <h2>Teksta Apstrāde ar Python</h2>
     <input type="text" id="userInput" placeholder="Ievadi tekstu">
     <button onclick="processInput()">Apstrādāt</button>
     <div id="result"></div>
   </div>
 
   <script>
-    function processInput() {
+    let pyodideReady = false;
+    let pyodide = null;
+
+    // Ielādē Pyodide
+    async function loadPyodideAndPackages() {
+      pyodide = await loadPyodide();
+      pyodideReady = true;
+      console.log("Pyodide ielādēts!");
+    }
+
+    loadPyodideAndPackages();
+
+    async function processInput() {
+      if (!pyodideReady) {
+        alert("Lūdzu, gaidi, līdz Pyodide ir ielādēts.");
+        return;
+      }
+
       const input = document.getElementById('userInput').value;
-      // Vienkārša apstrāde: pārvērst tekstu uz lielajiem burtiem
-      const processed = input.toUpperCase();
-      document.getElementById('result').innerText = `Apstrādāts teksts: ${processed}`;
+      try {
+        // Vienkārša Python apstrāde: pārvērst tekstu uz lielajiem burtiem
+        const pythonCode = `
+def process(text):
+    return text.upper()
+
+result = process("${input}")
+        `;
+        await pyodide.runPythonAsync(pythonCode);
+        const result = pyodide.globals.get('result');
+        document.getElementById('result').innerText = `Apstrādāts teksts: ${result}`;
+      } catch (error) {
+        console.error(error);
+        document.getElementById('result').innerText = `Kļūda: ${error}`;
+      }
     }
   </script>
 </body>
