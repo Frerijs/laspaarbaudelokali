@@ -1,33 +1,27 @@
-// libs/lasjs/LASLoader.js
+var utils = require("loader-utils");
+var cssnano = require("cssnano");
+var assign = require("object-assign");
+var loadFile = require("./load-file");
+var parseCssnano = require("./parse-cssnano");
 
-class LASLoader {
-  constructor() {
-    // Iniciāli nav nepieciešams
+var cssnanoLoader = function(source, map) {
+  this.cacheable();
+  var callback = this.async();
+
+  var options = {};
+  var query = utils.parseQuery(this.query);
+  if (query.configFile) {
+    assign(options, loadFile(query.configFile));
   }
+  assign(options, query);
+  assign(options, { map: map, sourcemap: true });
 
-  parse(arrayBuffer) {
-    const dataView = new DataView(arrayBuffer);
+  var resourcePath = this.resourcePath;
+  cssnano.process(source, options).then(function (result) {
+    var parsed = parseCssnano(result.css);
+    var map = assign({}, parsed.map, { file: resourcePath });
+    callback(null, parsed.css, map);
+  }, callback);
+};
 
-    // Piemērs: Izvelk informāciju no LAS faila
-    // Šis ir ļoti vienkāršots piemērs un nesatur pilnīgu LAS formāta atbalstu
-    const points = [];
-    const pointFormat = 3; // Piemēram, formāts ar X, Y, Z un classification
-
-    // Skaitļo punktu skaitu (pievienojiet pareizu LAS galvenes parsēšanu)
-    const pointCount = 1000; // Piemērs
-
-    for (let i = 0; i < pointCount; i++) {
-      const x = dataView.getFloat32(0 + i * 16, true);
-      const y = dataView.getFloat32(4 + i * 16, true);
-      const z = dataView.getFloat32(8 + i * 16, true);
-      const classification = dataView.getUint8(12 + i * 16);
-
-      points.push({ x, y, z, classification });
-    }
-
-    return { points };
-  }
-}
-
-// Eksportē LASLoader kā globālu objektu
-window.LASLoader = LASLoader;
+module.exports = cssnanoLoader;
