@@ -2,75 +2,84 @@
 <html lang="lv">
 <head>
   <meta charset="UTF-8" />
-  <title>LAS + CSV (Chunk + Parallel) ar rezultātu lejupielādi</title>
+  <title>LAS + CSV (Chunk + Parallel) ar pielāgotu meklēšanas attālumu</title>
   <style>
     body { font-family: sans-serif; margin: 20px; }
     #results table { border-collapse: collapse; width:100%; margin-top:1rem; }
     #results th, #results td { border:1px solid #ccc; padding:6px 10px; text-align:left; }
     #error { color:red; font-weight:bold; }
+    .inline-block { display:inline-block; margin-right:10px; }
   </style>
 </head>
 <body>
-  <h1>LAS un CSV salīdzināšana: Chunk + Web Workers + CSV Lejupielāde</h1>
+  <h1>LAS un CSV salīdzināšana: Chunk + Parallel + Distance Ievade</h1>
 
-  <p><strong>LAS fails (EPSG:3059):</strong></p>
-  <input type="file" id="lasFile" accept=".las" />
+  <p><strong>LAS fails (EPSG:3059)</strong>:</p>
+  <input type="file" id="lasFile" accept=".las" class="inline-block" />
 
-  <p><strong>CSV fails (EPSG:3059, kolonnas x,y,z):</strong></p>
-  <input type="file" id="csvFile" accept=".csv,text/csv" />
+  <p><strong>CSV fails (EPSG:3059, kolonnas x,y,z)</strong>:</p>
+  <input type="file" id="csvFile" accept=".csv,text/csv" class="inline-block" />
 
-  <br/>
+  <p>
+    <strong>Meklēšanas attālums (m):</strong><br/>
+    <input type="number" id="maxDistInput" step="0.01" value="0.2" />
+    <span style="color:#666; font-size:0.9em;">(Piem., 0.1 = 10cm, 0.2 = 20cm)</span>
+  </p>
+
   <button id="processBtn">Sākt apstrādi</button>
 
   <div id="error"></div>
   <div id="status"></div>
   <div id="results"></div>
 
-  <!-- PapaParse CSV parsēšanai -->
+  <!-- PapaParse CSV -->
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 
   <script>
-    /*************************************************************
-     * GALVENAIS SCRIPTS
-     *************************************************************/
+    /*************************************************
+     * GALVENIE MAINĪGIE
+     *************************************************/
     const lasInput = document.getElementById("lasFile");
     const csvInput = document.getElementById("csvFile");
     const processBtn = document.getElementById("processBtn");
+    const maxDistInput = document.getElementById("maxDistInput");
+
     const errorDiv = document.getElementById("error");
     const statusDiv = document.getElementById("status");
     const resultsDiv = document.getElementById("results");
 
-    // CSV punkti un labākās atbilstības
     let csvPoints = [];
     let bestDist = [];
     let bestLASZ = [];
 
-    // Web Worker pool
     let workers = [];
     let freeWorkers = [];
     let chunkTasks = [];
     let totalChunks = 0;
     let chunksCompleted = 0;
 
+    // Ko cik punktus chunk
     const CHUNK_SIZE = 100000;
-    const MAX_DISTANCE = 0.2;
+
+    // Worker skaits
     let numWorkers = navigator.hardwareConcurrency || 4;
 
+    // LAS faila info
     let lasFile;
     let lasInfo;
 
-    /*************************************************************
+    /*************************************************
      * 1) CSV lasīšana
-     *************************************************************/
-    async function parseCSV(file) {
+     *************************************************/
+    function parseCSV(file) {
       return new Promise((resolve, reject) => {
         Papa.parse(file, {
           header: true,
           skipEmptyLines: true,
-          complete: (results) => {
+          complete: results => {
             try {
               const data = results.data;
-              const pts = data.map(row => {
+              const points = data.map(row => {
                 const keys = {};
                 for (let k of Object.keys(row)) {
                   keys[k.toLowerCase()] = row[k];
@@ -79,8 +88,8 @@
                 const Y = parseFloat(keys['y']);
                 const Z = parseFloat(keys['z']);
                 return {x:X, y:Y, z:Z};
-              }).filter(p=>!isNaN(p.x) && !isNaN(p.y) && !isNaN(p.z));
-              resolve(pts);
+              }).filter(p => !isNaN(p.x) && !isNaN(p.y) && !isNaN(p.z));
+              resolve(points);
             } catch (err) {
               reject(err);
             }
@@ -90,35 +99,34 @@
       });
     }
 
-    /*************************************************************
+    /*************************************************
      * 2) LAS galvenes lasīšana
-     *************************************************************/
+     *************************************************/
     async function readLASHeader(file) {
       const headerSize = 375;
       const ab = await file.slice(0, headerSize).arrayBuffer();
       const dv = new DataView(ab);
 
-      const signature = String.fromCharCode(
+      const sig = String.fromCharCode(
         dv.getUint8(0), dv.getUint8(1),
         dv.getUint8(2), dv.getUint8(3)
       );
-      if (signature !== "LASF") {
-        throw new Error("Failā nav 'LASF' signatūra");
-      }
-
+      if (sig !== "LASF") throw new Error("Nav 'LASF' signatūra (nav .las)!");
+      
       const pointDataOffset = dv.getUint32(96, true);
       const numPoints = dv.getUint32(107, true);
 
       const scaleX = dv.getFloat64(131, true);
       const scaleY = dv.getFloat64(139, true);
       const scaleZ = dv.getFloat64(147, true);
+
       const offX = dv.getFloat64(155, true);
       const offY = dv.getFloat64(163, true);
       const offZ = dv.getFloat64(171, true);
 
-      const fmt = dv.getUint8(104);
-      if (![0,1,2,3].includes(fmt)) {
-        throw new Error("Neparedzēts Point Data Format: "+fmt);
+      const format = dv.getUint8(104);
+      if (![0,1,2,3].includes(format)) {
+        throw new Error("Neparedzēts Point Data Format: "+format);
       }
       const recLen = dv.getUint16(105, true);
 
@@ -131,9 +139,9 @@
       };
     }
 
-    /*************************************************************
+    /*************************************************
      * 3) Worker pool
-     *************************************************************/
+     *************************************************/
     function createWorkerPool(num) {
       workers = [];
       freeWorkers = [];
@@ -142,16 +150,16 @@
         const url = URL.createObjectURL(blob);
         const w = new Worker(url);
 
-        w.onmessage = (evt) => handleWorkerMessage(w, evt.data);
+        w.onmessage = evt => handleWorkerMessage(w, evt.data);
         workers.push(w);
         freeWorkers.push(w);
       }
     }
 
     function handleWorkerMessage(worker, msg) {
-      if (msg.type === 'chunkResult') {
-        // Saliekam starprezultātus
-        for (const upd of msg.payload) {
+      if (msg.type==='chunkResult') {
+        // Apvieno starprezultātus
+        for (let upd of msg.payload) {
           if (upd.dist < bestDist[upd.idx]) {
             bestDist[upd.idx] = upd.dist;
             bestLASZ[upd.idx] = upd.lasZ;
@@ -162,17 +170,17 @@
         freeWorkers.push(worker);
         scheduleChunk();
       }
-      else if (msg.type === 'done') {
-        // Worker pabeidz
+      else if (msg.type==='done') {
+        // worker pabeidz
       }
-      else if (msg.type === 'log') {
+      else if (msg.type==='log') {
         console.log("Worker:", msg.payload);
       }
     }
 
-    /*************************************************************
+    /*************************************************
      * 4) Chunk scheduling
-     *************************************************************/
+     *************************************************/
     async function scheduleChunk() {
       if (chunkTasks.length===0) {
         if (chunksCompleted===totalChunks) {
@@ -180,39 +188,35 @@
         }
         return;
       }
-      if (freeWorkers.length===0) {
-        return;
-      }
+      if (freeWorkers.length===0) return;
+
       const task = chunkTasks.shift();
       const worker = freeWorkers.pop();
 
-      const blob = lasFile.slice(task.byteStart, task.byteStart + task.byteLength);
-      const arrayBuf = await blob.arrayBuffer();
+      const blob = lasFile.slice(task.byteStart, task.byteStart+task.byteLength);
+      const ab = await blob.arrayBuffer();
 
       worker.postMessage({
-        type:'processChunk',
-        buffer: arrayBuf,
+        type: 'processChunk',
+        buffer: ab,
         chunkPoints: task.chunkPoints,
         pointRecordLen: lasInfo.pointRecordLen,
         scale: lasInfo.scale,
-        offset: lasInfo.offset,
-        maxDistance: MAX_DISTANCE
-      }, [arrayBuf]);
+        offset: lasInfo.offset
+      }, [ab]);
     }
 
-    /*************************************************************
-     * 5) finalizeResults + CSV Lejupielādes daļa
-     *************************************************************/
+    /*************************************************
+     * 5) finalizeResults + CSV lejupielāde
+     *************************************************/
     function finalizeResults() {
       statusDiv.textContent = "Veido rezultātu...";
-      // HTML tabula
       let html = `<table>
         <tr><th>CSV X</th><th>CSV Y</th><th>CSV Z</th><th>LAS Z</th><th>ΔZ</th><th>dist</th></tr>`;
-      // CSV teksta rindas
       let csvLines = ["CSV_X,CSV_Y,CSV_Z,LAS_Z,DeltaZ,Dist"];
 
       for (let i=0; i<csvPoints.length; i++) {
-        if (bestDist[i] < Infinity) {
+        if (bestDist[i]<Infinity) {
           const dz = csvPoints[i].z - bestLASZ[i];
           html += `
             <tr>
@@ -222,9 +226,7 @@
               <td>${bestLASZ[i].toFixed(3)}</td>
               <td>${dz.toFixed(3)}</td>
               <td>${bestDist[i].toFixed(3)}</td>
-            </tr>
-          `;
-          // CSV rinda
+            </tr>`;
           csvLines.push([
             csvPoints[i].x.toFixed(3),
             csvPoints[i].y.toFixed(3),
@@ -241,7 +243,6 @@
               <td>${csvPoints[i].z.toFixed(3)}</td>
               <td>-</td><td>-</td><td>-</td>
             </tr>`;
-          // CSV rinda: ar tukšiem lauciņiem
           csvLines.push([
             csvPoints[i].x.toFixed(3),
             csvPoints[i].y.toFixed(3),
@@ -253,26 +254,25 @@
       html += "</table>";
       resultsDiv.innerHTML = `<h3>Rezultāts</h3>${html}`;
 
-      // Tagad ģenerējam CSV failu
-      const csvContent = csvLines.join("\n");
-      const blob = new Blob([csvContent], {type: "text/csv"});
+      // sagatavojam CSV
+      const csvText = csvLines.join("\n");
+      const blob = new Blob([csvText], {type:"text/csv"});
       const url = URL.createObjectURL(blob);
 
-      // Pievienojam <a> linku lejupielādei
-      const downloadLink = document.createElement("a");
-      downloadLink.href = url;
-      downloadLink.download = "rezultati.csv";
-      downloadLink.textContent = "Lejupielādēt CSV";
-      downloadLink.style.display = "inline-block";
-      downloadLink.style.marginTop = "10px";
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "rezultati.csv";
+      link.textContent = "Lejupielādēt CSV";
+      link.style.marginTop = "10px";
+      link.style.display = "inline-block";
 
       resultsDiv.appendChild(document.createElement("br"));
-      resultsDiv.appendChild(downloadLink);
+      resultsDiv.appendChild(link);
     }
 
-    /*************************************************************
-     * 6) Pogas notikums
-     *************************************************************/
+    /*************************************************
+     * 6) Poga "Sākt apstrādi"
+     *************************************************/
     processBtn.addEventListener('click', async () => {
       errorDiv.textContent = "";
       resultsDiv.innerHTML = "";
@@ -284,22 +284,27 @@
       }
 
       try {
-        // 1) Nolasa CSV
+        // 1) Nolasa ievadīto attālumu
+        const userDist = parseFloat(maxDistInput.value);
+        const maxDist = (!isNaN(userDist) && userDist>0) ? userDist : 0.2; // noklusēts 0.2
+        console.log("DEBUG: userDist=", userDist, " => maxDist=", maxDist);
+
+        // 2) Nolasa CSV
         statusDiv.textContent = "Nolasa CSV...";
         csvPoints = await parseCSV(csvInput.files[0]);
         bestDist = new Array(csvPoints.length).fill(Infinity);
         bestLASZ = new Array(csvPoints.length).fill(null);
 
-        // 2) Nolasa LAS galveni
+        // 3) Nolasa LAS galveni
         statusDiv.textContent = "Nolasa LAS galveni...";
         lasFile = lasInput.files[0];
         lasInfo = await readLASHeader(lasFile);
 
-        // 3) sagatavo chunk
+        // 4) Izveido chunk sarakstu
         chunkTasks = [];
         let pointsRemaining = lasInfo.numPoints;
         let currentByteOffset = lasInfo.pointDataOffset;
-        let totalPointsRead = 0;
+        let totalPointsRead=0;
 
         while (pointsRemaining>0) {
           const chunkPoints = Math.min(CHUNK_SIZE, pointsRemaining);
@@ -314,42 +319,42 @@
           totalPointsRead += chunkPoints;
         }
         totalChunks = chunkTasks.length;
-        chunksCompleted = 0;
-        statusDiv.textContent = `Sagatavoti ${totalChunks} chunki`;
+        chunksCompleted=0;
 
-        // 4) Izveido workerus
+        statusDiv.textContent = `Sagatavoti ${totalChunks} chunki...`;
+
+        // 5) Izveido Worker pool
         createWorkerPool(numWorkers);
 
-        // 5) Sūtam CSV, maxDistance => worker init
+        // 6) Nosūtām CSV un maxDist uz worker "init"
         for (let w of workers) {
           w.postMessage({
             type:'initCSV',
             csvPoints,
-            maxDistance: MAX_DISTANCE
+            maxDistance: maxDist
           });
         }
 
-        // 6) Sāk chunkus
+        // 7) Uzsāk chunk scheduling
         for (let i=0; i<freeWorkers.length; i++) {
           scheduleChunk();
         }
 
       } catch (err) {
         console.error(err);
-        errorDiv.textContent = "Kļūda: " + err.message;
+        errorDiv.textContent = "Kļūda: "+err.message;
       }
     });
   </script>
 
   <!--
-    II. Worker SCRIPT (inline)
-    Tas pats, kas iepriekš
+    II. WORKER SCRIPT (inline)
   -->
   <script type="javascript/worker" id="worker-script">
     let csvPoints = [];
     let maxDistance = 0.2;
 
-    onmessage = async (evt) => {
+    onmessage = function(evt) {
       const msg = evt.data;
       if (msg.type==='initCSV') {
         csvPoints = msg.csvPoints;
@@ -377,7 +382,8 @@
             const dy = csvPoints[c].y - Y;
             const dist2 = dx*dx + dy*dy;
             if (dist2 <= maxDistance*maxDistance) {
-              updates.push({idx:c, dist:Math.sqrt(dist2), lasZ:Z});
+              const dist = Math.sqrt(dist2);
+              updates.push({idx:c, dist, lasZ:Z});
             }
           }
         }
