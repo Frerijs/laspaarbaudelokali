@@ -8,36 +8,34 @@ const errorDiv = document.getElementById("error");
 const statusDiv = document.getElementById("status");
 const resultsDiv = document.getElementById("results");
 
-// Konstantes
-const RADIUS = 0.2;       // 20 cm
-const CHUNK_SIZE = 200000; // cik LAS punktus vienā chunk
-let numWorkers = navigator.hardwareConcurrency || 4; 
-// varbūt lietot 4, 8, 16, atkarībā no CPU
+const RADIUS = 0.2;        // 20cm meklēšanas rādiuss
+const CHUNK_SIZE = 200000; // punktu skaits katrā chunk
+let numWorkers = navigator.hardwareConcurrency || 4; // cik CPU kodoli
 
-// Globāli
+// Glabāsim CSV, rezultātus un info
 let csvPoints = [];
 let bestDist = [];
 let bestLASZ = [];
 
-let lasFile;
-let lasInfo; // satur numPoints, pointDataOffset, pointRecordLen, scale, offset
-let chunkTasks = [];  // chunku "rinda" (visas chunk definīcijas)
+let lasFile;      // .las fails
+let lasInfo;      // {numPoints, pointDataOffset, pointRecordLen, scale, offset}
+let chunkTasks = [];     // masīvs ar chunk definīcijām
 let totalChunks = 0;
 let chunksCompleted = 0;
 
 // Worker pool
 let workers = [];
-let freeWorkers = []; // kuri workers nav aizņemti
+let freeWorkers = [];
 
 // ===========================
-// 1) CSV lasīšana
+// 1) CSV lasīšana (PapaParse)
 // ===========================
 async function parseCSV(file) {
   return new Promise((resolve, reject) => {
     Papa.parse(file, {
       header: true,
       skipEmptyLines: true,
-      complete: (results) => {
+      complete: results => {
         try {
           const data = results.data;
           const pts = data.map(row => {
@@ -48,76 +46,75 @@ async function parseCSV(file) {
             const X = parseFloat(keys['x']);
             const Y = parseFloat(keys['y']);
             const Z = parseFloat(keys['z']);
-            return {x:X, y:Y, z:Z};
+            return {x: X, y: Y, z: Z};
           }).filter(p => !isNaN(p.x) && !isNaN(p.y) && !isNaN(p.z));
           resolve(pts);
-        } catch (err) {
-          reject(err);
-        }
+        } catch (err) { reject(err); }
       },
-      error: (err) => reject(err)
+      error: err => reject(err)
     });
   });
 }
 
 // ===========================
-// 2) LAS galvenes lasīšana
+// 2) LAS galvenes nolasīšana
 // ===========================
 async function readLASHeader(file) {
   const headerSize = 375;
   const ab = await file.slice(0, headerSize).arrayBuffer();
   const dv = new DataView(ab);
 
-  const sig = String.fromCharCode(dv.getUint8(0),dv.getUint8(1),dv.getUint8(2),dv.getUint8(3));
-  if (sig !== "LASF") throw new Error("Trūkst 'LASF' signatūra!");
+  // Pārbaudām "LASF"
+  const signature = String.fromCharCode(
+    dv.getUint8(0),
+    dv.getUint8(1),
+    dv.getUint8(2),
+    dv.getUint8(3)
+  );
+  if (signature !== "LASF") {
+    throw new Error("Nav 'LASF' signatūra. Vai tiešām LAS fails?");
+  }
 
   const pointDataOffset = dv.getUint32(96, true);
   const numPoints = dv.getUint32(107, true);
-  const sx = dv.getFloat64(131, true);
-  const sy = dv.getFloat64(139, true);
-  const sz = dv.getFloat64(147, true);
-  const ox = dv.getFloat64(155, true);
-  const oy = dv.getFloat64(163, true);
-  const oz = dv.getFloat64(171, true);
+  const scaleX = dv.getFloat64(131, true);
+  const scaleY = dv.getFloat64(139, true);
+  const scaleZ = dv.getFloat64(147, true);
+  const offX = dv.getFloat64(155, true);
+  const offY = dv.getFloat64(163, true);
+  const offZ = dv.getFloat64(171, true);
 
-  const format = dv.getUint8(104);
-  if (![0,1,2,3].includes(format)) {
-    throw new Error("Neparedzēts Point Data Format: " + format);
+  const pointFormat = dv.getUint8(104);
+  if (![0,1,2,3].includes(pointFormat)) {
+    throw new Error("Neparedzēts Point Data Format: " + pointFormat);
   }
-  const recordLen = dv.getUint16(105, true);
+  const pointRecordLen = dv.getUint16(105, true);
 
   return {
     numPoints,
     pointDataOffset,
-    pointRecordLen: recordLen,
-    scale: [sx, sy, sz],
-    offset: [ox, oy, oz]
+    pointRecordLen,
+    scale: [scaleX, scaleY, scaleZ],
+    offset: [offX, offY, offZ]
   };
 }
 
 // ===========================
-// 3) K-d tree CSV pusē (ja vajag)
-//     var kdbush = ...
-// ===========================
-// Demo: izlaidīsim reālo implementāciju, bet reālajā risinājumā
-// te iebūvē kdbush no CSV punktiem un saglabā kdIndex.
-
-// ===========================
-// 4) sagatavo worker baseinu (pool)
+// 3) Izveido workeru baseinu
 // ===========================
 function createWorkerPool(num) {
   workers = [];
   freeWorkers = [];
-  for (let i=0; i<num; i++) {
+  for (let i = 0; i < num; i++) {
     const w = new Worker('./worker.js');
-    w.onmessage = (evt) => handleWorkerMessage(w, evt.data);
+    w.onmessage = evt => handleWorkerMessage(w, evt.data);
     workers.push(w);
-    freeWorkers.push(w); // sākumā visi brīvi
+    freeWorkers.push(w);
   }
 }
 
 // ===========================
-// 5) Kad worker pabeidz chunk, apstrādājam
+// 4) Apstrāde, kad worker pabeidz chunk
 // ===========================
 function handleWorkerMessage(worker, msg) {
   if (msg.type === 'chunkResult') {
@@ -128,16 +125,13 @@ function handleWorkerMessage(worker, msg) {
         bestLASZ[upd.idx] = upd.lasZ;
       }
     }
-    // chunk pabeigts -> chunkCompleted++
     chunksCompleted++;
-    statusDiv.innerHTML = `Chunki: ${chunksCompleted} / ${totalChunks}`;
-    // atbrīvojam worker
-    freeWorkers.push(worker);
-    // mēģinām iedot nākamo chunk
-    scheduleChunk();
+    statusDiv.innerHTML = `Chunki: ${chunksCompleted}/${totalChunks}`;
+    freeWorkers.push(worker); // worker atkal ir brīvs
+    scheduleChunk(); // mēģinām iedot nākamo chunk
   }
   else if (msg.type === 'done') {
-    // Worker paziņo, ka vairs nav chunku => ignorējam
+    // Worker pabeidzis
   }
   else if (msg.type === 'log') {
     console.log("Worker log:", msg.payload);
@@ -145,47 +139,49 @@ function handleWorkerMessage(worker, msg) {
 }
 
 // ===========================
-// 6) Uzdevumu (chunku) scheduling
+// 5) Uzdevumu (chunk) sadale
 // ===========================
-function scheduleChunk() {
+async function scheduleChunk() {
   if (chunkTasks.length === 0) {
-    // Nav vairāk chunku rindā
-    // Pārbaudām, vai visi chunki jau pabeigti?
+    // Varbūt jau visi chunk pabeigti?
     if (chunksCompleted === totalChunks) {
-      // Done
       finalizeResults();
     }
     return;
   }
   if (freeWorkers.length === 0) {
-    // Nav brīvu workeru
+    // nav brīvu workeru
     return;
   }
-  // Piešķiram vienu chunk
+
+  // Izvelkam vienu chunk
   const task = chunkTasks.shift();
   const worker = freeWorkers.pop();
 
+  // 1) Nolasām chunk par arrayBuffer jau šeit (lai “transferētu” tieši)
+  const {byteStart, byteLength, chunkPoints} = task;
+  const blob = lasFile.slice(byteStart, byteStart + byteLength);
+  const ab = await blob.arrayBuffer();
+
   worker.postMessage({
     type: 'processChunk',
-    chunkOffset: task.chunkOffset,
-    chunkPoints: task.chunkPoints,
+    buffer: ab,
+    chunkPoints,
     pointRecordLen: lasInfo.pointRecordLen,
     scale: lasInfo.scale,
     offset: lasInfo.offset,
-    radius: RADIUS,
-    fileSlice: lasFile.slice(task.byteStart, task.byteStart + task.byteLength)
-  });
+    radius: RADIUS
+  }, [ab]); // transfer arrayBuffer
 }
 
 // ===========================
-// 7) Kad visi chunk apstrādāti, parādām rezultātu
+// 6) Kad apstrāde pabeigta
 // ===========================
 function finalizeResults() {
-  statusDiv.innerHTML = "Gatavs! Veido rezultātu...";
+  statusDiv.innerHTML = "Veido rezultātu...";
   let html = "<table><tr><th>CSV X</th><th>CSV Y</th><th>CSV Z</th><th>LAS Z</th><th>ΔZ</th><th>dist</th></tr>";
   for (let i=0; i<csvPoints.length; i++) {
-    const dist = bestDist[i];
-    if (dist < Infinity) {
+    if (bestDist[i] < Infinity) {
       const dz = csvPoints[i].z - bestLASZ[i];
       html += `
         <tr>
@@ -194,7 +190,7 @@ function finalizeResults() {
           <td>${csvPoints[i].z.toFixed(3)}</td>
           <td>${bestLASZ[i].toFixed(3)}</td>
           <td>${dz.toFixed(3)}</td>
-          <td>${dist.toFixed(3)}</td>
+          <td>${bestDist[i].toFixed(3)}</td>
         </tr>`;
     } else {
       html += `
@@ -208,16 +204,15 @@ function finalizeResults() {
   }
   html += "</table>";
   resultsDiv.innerHTML = html;
-  statusDiv.innerHTML = "Rezultāts gatavs!";
-  // beidzam
-  // (var postMessage('done') katram workeram, lai tie noslēdz)
+  statusDiv.innerHTML = "Gatavs!";
+  // Lūdzu, var sūtīt "noMoreChunks" workeriem, ja gribat
   for (let w of workers) {
     w.postMessage({type:'noMoreChunks'});
   }
 }
 
 // ===========================
-// 8) Pogas klikšķa process
+// 7) Pogas notikums
 // ===========================
 processBtn.addEventListener('click', async ()=> {
   errorDiv.textContent = "";
@@ -225,25 +220,28 @@ processBtn.addEventListener('click', async ()=> {
   statusDiv.innerHTML = "";
 
   if (!csvInput.files.length || !lasInput.files.length) {
-    errorDiv.textContent = "Atlasiet gan CSV, gan LAS failu!";
+    errorDiv.textContent = "Lūdzu, atlasiet gan CSV, gan LAS failu!";
     return;
   }
+
   try {
+    // 1) Nolasa CSV
     statusDiv.innerHTML = "Nolasa CSV...";
     csvPoints = await parseCSV(csvInput.files[0]);
-    // Iniciē bestDist, bestLASZ
+    // Iniciē "bestDist", "bestLASZ"
     bestDist = new Array(csvPoints.length).fill(Infinity);
     bestLASZ = new Array(csvPoints.length).fill(null);
 
-    // TODO: izveidot kdIndex no csvPoints, saglabāt, ja vajag
-    // un Worker'iem sūtīt kdIndex (vai load to top)...
+    // *Šeit* var izveidot k-d tree no CSV, un varbūt saglabāt to
+    // par Worker pusei (ar initCSV). Attiecīgi worker.js jāpārveido.
+    // Piemērs: kdIndex = kdbush(csvPoints, p=>p.x, p=>p.y, ...);
 
-    // Nolasa LAS galveni
+    // 2) Nolasa LAS galveni
     statusDiv.innerHTML = "Nolasa LAS galveni...";
     lasFile = lasInput.files[0];
     lasInfo = await readLASHeader(lasFile);
 
-    // Aprēķinām chunku sarakstu
+    // 3) Sagatavo chunk sarakstu
     chunkTasks = [];
     let pointsRemaining = lasInfo.numPoints;
     let currentByteOffset = lasInfo.pointDataOffset;
@@ -251,33 +249,36 @@ processBtn.addEventListener('click', async ()=> {
     while (pointsRemaining > 0) {
       const chunkPoints = Math.min(CHUNK_SIZE, pointsRemaining);
       const byteLen = chunkPoints * lasInfo.pointRecordLen;
-
       chunkTasks.push({
-        chunkOffset: totalPointsRead, // "pirmā punkta indekss", ne vienmēr vajadzīgs
         chunkPoints,
         byteStart: currentByteOffset,
         byteLength: byteLen
       });
-
       currentByteOffset += byteLen;
       pointsRemaining -= chunkPoints;
       totalPointsRead += chunkPoints;
     }
     totalChunks = chunkTasks.length;
     chunksCompleted = 0;
+
     statusDiv.innerHTML = `Sagatavoti ${totalChunks} chunki.`;
 
-    // Izveido workerus
+    // 4) Izveido workeru pool
     createWorkerPool(numWorkers);
 
-    // Sāk scheduling
-    // Palaid scheduleChunk tik reižu, cik mums brīvo workeru
+    // 5) Var sūtīt "initCSV" workerim, ja vajag
+    //    (Šeit atstājam brīvu. Ja gribat sūtīt CSV punktus, dari:)
+    // for (let w of workers) {
+    //   w.postMessage({ type:'initCSV', csvPoints, radius:RADIUS });
+    // }
+
+    // 6) Startē chunk scheduling
     for (let i=0; i<freeWorkers.length; i++) {
       scheduleChunk();
     }
 
   } catch (err) {
     console.error(err);
-    errorDiv.textContent = err.message;
+    errorDiv.textContent = "Kļūda: " + err.message;
   }
 });
