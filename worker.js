@@ -1,30 +1,34 @@
 // worker.js
 
+// Ja vajag "globālos" CSV/kdIndex:
 let csvPoints = [];
 let radius = 0.2;
+// let kdIndex = null; // ja izmantojam kdbush, te saglabā
 
-// onmessage
 onmessage = async function(evt) {
   const msg = evt.data;
 
-  if (msg.type === 'processChunk') {
-    // Saņem chunk definīciju
-    const fileSlice = msg.fileSlice; // tas ir Blob
+  if (msg.type === 'initCSV') {
+    // Ja vēlaties CSV glabāt workerī
+    csvPoints = msg.csvPoints;
+    radius = msg.radius;
+    // te var izveidot kdIndex: kdIndex = kdbush(...);
+    // ...
+  }
+  else if (msg.type === 'processChunk') {
+    // Tagad tieši saņemam ArrayBuffer
+    const buffer = msg.buffer; 
+    const dv = new DataView(buffer);
+
     const chunkPoints = msg.chunkPoints;
     const recordLen = msg.pointRecordLen;
     const [sx, sy, sz] = msg.scale;
     const [ox, oy, oz] = msg.offset;
     const rad = msg.radius || 0.2;
 
-    // Nolasa buffer:
-    const buffer = await fileSlice.arrayBuffer();
-    const dv = new DataView(buffer);
-
-    // Rezultāta masīvs
-    const updates = [];
-
-    // DEMO: nav reāla k-d tree, bet joprojām naivs meklējums CSV
+    let updates = [];
     let off = 0;
+
     for (let i=0; i<chunkPoints; i++) {
       const Xint = dv.getInt32(off + 0, true);
       const Yint = dv.getInt32(off + 4, true);
@@ -35,27 +39,24 @@ onmessage = async function(evt) {
       const Y = Yint*sy + oy;
       const Z = Zint*sz + oz;
 
-      // Te jālieto kdIndex, bet DEMO - naivs loop:
-      for (let c=0; c<csvPoints.length; c++) {
-        const dx = csvPoints[c].x - X;
-        const dy = csvPoints[c].y - Y;
-        const dist2d = Math.sqrt(dx*dx + dy*dy);
-        if (dist2d <= rad) {
-          updates.push({
-            idx: c,
-            dist: dist2d,
-            lasZ: Z
-          });
+      // DEMO: nav reāla k-d tree meklēšana
+      // Naivi: CSV pusē O(M). Reālajā risinājumā:
+      //   - kdIndex.range(X-rad, Y-rad, X+rad, Y+rad) => candidateIndices
+      //   - un tad aprēķināt attālumu <= rad
+      if (csvPoints.length) {
+        for (let c=0; c<csvPoints.length; c++) {
+          const dx = csvPoints[c].x - X;
+          const dy = csvPoints[c].y - Y;
+          const dist2 = dx*dx + dy*dy;
+          if (dist2 <= rad*rad) {
+            const dist = Math.sqrt(dist2);
+            updates.push({ idx:c, dist, lasZ:Z });
+          }
         }
       }
     }
 
-    postMessage({type:'chunkResult', payload:updates});
-  }
-  else if (msg.type === 'initCSV') {
-    csvPoints = msg.csvPoints;
-    radius = msg.radius;
-    // te varētu izveidot kdIndex no csvPoints
+    postMessage({type:'chunkResult', payload: updates});
   }
   else if (msg.type === 'noMoreChunks') {
     postMessage({type:'done'});
