@@ -122,12 +122,9 @@ try:
 
     # Konvertējiet rezultātu uz CSV
     result_csv = csv_df.to_csv(index=False)
-
 except Exception as e:
     result_csv = str(e)
-
-result_csv
-                    `;
+`;
 
                     try {
                         let result = await pyodide.runPythonAsync(code);
@@ -156,10 +153,6 @@ result_csv
         }
 
         function downloadCsv(csvContent) {
-            if (!csvContent || csvContent === 'undefined') {
-                alert("Nav ko lejupielādēt.");
-                return;
-            }
             let blob = new Blob([csvContent], { type: "text/csv" });
             let link = document.createElement("a");
             link.href = URL.createObjectURL(blob);
