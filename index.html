@@ -1,56 +1,42 @@
 <!DOCTYPE html>
-<html lang="lv">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LAS & CSV Salīdzināšana</title>
-    <script src="https://cdn.jsdelivr.net/pyodide/v0.23.4/full/pyodide.js"></script>
+    <title>LAS Apstrāde pārlūkā ar PDAL.js</title>
+    <script src="https://unpkg.com/pdal"></script>
 </head>
 <body>
-    <h2>LAS & CSV Salīdzināšana</h2>
-    
-    <label for="csvFile">Augšupielādēt CSV:</label>
-    <input type="file" id="csvFile" accept=".csv"><br><br>
-
-    <button onclick="processCsv()">Apstrādāt CSV</button>
-
-    <p id="output">Rezultāts tiks attēlots šeit...</p>
+    <h2>LAS faila apstrāde ar WebAssembly</h2>
+    <input type="file" id="lasFile" accept=".las">
+    <button onclick="processLAS()">Apstrādāt LAS</button>
+    <pre id="output"></pre>
 
     <script>
-        async function loadPyodideAndRun() {
-            let pyodide = await loadPyodide();
-            await pyodide.loadPackage(["numpy", "pandas"]);
-            return pyodide;
-        }
-
-        async function processCsv() {
-            let pyodide = await loadPyodideAndRun();
-            let csvFile = document.getElementById("csvFile").files[0];
-
-            if (!csvFile) {
-                document.getElementById("output").innerText = "Lūdzu, augšupielādējiet CSV failu!";
+        async function processLAS() {
+            let lasFile = document.getElementById("lasFile").files[0];
+            if (!lasFile) {
+                document.getElementById("output").innerText = "Lūdzu, augšupielādējiet LAS failu!";
                 return;
             }
 
             let reader = new FileReader();
             reader.onload = async function(event) {
-                let csvData = event.target.result;
+                let buffer = event.target.result;
 
-                let code = `
-import pandas as pd
-from io import StringIO
+                // Izveido PDAL WebAssembly vidi
+                let pdal = await PDAL();
+                let pipeline = {
+                    "pipeline": [
+                        { "type": "readers.las", "filename": buffer },
+                        { "type": "filters.sort", "dimension": "Z" },
+                        { "type": "writers.text", "filename": "output.txt" }
+                    ]
+                };
 
-csv_data = '''${csvData}'''
-df = pd.read_csv(StringIO(csv_data))
-df["Z_Offset"] = df["z"] - df["z"].mean()  # Piemērs: aprēķina Z vērtību nobīdi
-df.head().to_csv(index=False)
-                `;
-
-                let result = await pyodide.runPythonAsync(code);
-                document.getElementById("output").innerText = "Rezultāts:\n" + result;
+                let result = pdal.runPipeline(JSON.stringify(pipeline));
+                document.getElementById("output").innerText = "Apstrādāts LAS fails: " + JSON.stringify(result);
             };
 
-            reader.readAsText(csvFile);
+            reader.readAsArrayBuffer(lasFile);
         }
     </script>
 </body>
