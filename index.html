@@ -4,9 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LAS un CSV Salīdzināšana</title>
-    <!-- Iekļaujiet las-js bibliotēku -->
-    <script src="libs/las.min.js"></script> <!-- Pārliecinieties, ka ceļš ir pareizs -->
+    
+    <!-- Iekļaujiet favicon.ico, lai izvairītos no 404 kļūdas -->
+    <link rel="icon" type="image/png" href="https://frerijs.github.io/laspaarbaudelokali/favicon.ico">
+
+    <!-- Pareizais ceļš uz jūsu `las.min.js` -->
+    <script src="https://frerijs.github.io/laspaarbaudelokali/libs/las.min.js"></script>
+    
+    <!-- Pyodide ielāde -->
     <script src="https://cdn.jsdelivr.net/pyodide/v0.23.4/full/pyodide.js"></script>
+    
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -15,15 +22,15 @@
         
         <label for="lasFile">Augšupielādēt LAS:</label>
         <input type="file" id="lasFile" accept=".las"><br>
-    
+
         <label for="csvFile">Augšupielādēt CSV:</label>
         <input type="file" id="csvFile" accept=".csv"><br><br>
-        
+
         <label for="distance">Maksimālais attālums (cm):</label>
         <input type="number" id="distance" value="10" min="1" step="1">
         <button onclick="updateDistance()">Atjaunināt attālumu</button>
         <p id="distanceDisplay">Izvēlētais attālums: 10 cm</p><br>
-        
+
         <button onclick="processFiles()">Salīdzināt</button>
         <p id="output"></p>
     </div>
@@ -64,7 +71,12 @@
                 lasReader.onload = async function(eventLas) {
                     let lasArrayBuffer = eventLas.result;
 
-                    // Parsējiet LAS failu ar las-js
+                    // Pārbaudiet, vai LASParser ir definēts
+                    if (typeof LASParser === 'undefined') {
+                        document.getElementById("output").innerText = "Kļūda: LAS parseris nav ielādēts.";
+                        return;
+                    }
+
                     try {
                         let las = LASParser.parse(lasArrayBuffer);
                         let lasPoints = las.points.map(point => [point.x, point.y, point.z]);
@@ -77,7 +89,6 @@
                         let pyodide = await loadPyodide();
                         await pyodide.loadPackage(["numpy", "pandas", "scipy"]);
 
-                        // Pārvērtiet LAS punktus uz JSON formātu, lai tos varētu izmantot Python pusē
                         let lasPointsJSON = JSON.stringify(lasPoints);
 
                         let code = `
@@ -88,7 +99,6 @@ import json
 from io import StringIO
 
 try:
-    # Ielādē CSV datus
     csv_df = pd.read_csv(StringIO("""${csvData}"""))
     if csv_df.empty:
         raise ValueError("CSV fails nesatur datus.")
@@ -99,17 +109,14 @@ try:
 
     csv_points = csv_df[['x', 'y', 'z']].to_numpy()
 
-    # Ielādē LAS punktus no JSON
     las_points = np.array(json.loads("""${lasPointsJSON}"""))
 
     if las_points.size == 0:
         raise ValueError("LAS fails nesatur punktus.")
 
-    # Izveidojiet KDTree priekš LAS punktiem
     tree = cKDTree(las_points[:, :2])
     distances, indices = tree.query(csv_points[:, :2], distance_upper_bound=${maxDistance})
 
-    # Izveidojiet masku, kas nosaka derīgos indeksus
     mask = distances < ${maxDistance}
     valid_indices = indices < len(las_points)
     final_mask = mask & valid_indices
@@ -117,20 +124,14 @@ try:
     if not np.any(final_mask):
         raise ValueError("Nav atrasti LAS punkti noteiktajā attāluma robežās.")
 
-    # Inicializējiet Z_Difference ar NaN
     z_diff = np.full(len(csv_points), np.nan)
-
-    # Aprēķiniet Z_Difference tikai tiem punktiem, kas atrodas attāluma robežās
     z_diff[final_mask] = csv_points[final_mask, 2] - las_points[indices[final_mask], 2]
 
-    # Pievienojiet rezultātu DataFrame
     csv_df["Z_Difference"] = z_diff
 
-    # Pārbaudiet, vai ir kaut kas salīdzināms
     if csv_df["Z_Difference"].isnull().all():
-        raise ValueError("Nav salīdzināmu punktu. Nav atrasti LAS punkti noteiktajā attāluma robežās.")
+        raise ValueError("Nav salīdzināmu punktu.")
 
-    # Konvertējiet rezultātu uz CSV
     result_csv = csv_df.to_csv(index=False)
 
 except Exception as e:
@@ -139,43 +140,39 @@ except Exception as e:
 result_csv
                         `;
 
-                        try {
-                            let result = await pyodide.runPythonAsync(code);
-                            
-                            // Pārbaudiet, vai rezultāts satur "Z_Difference" kolonnas
-                            if (result.includes("Z_Difference")) {
-                                document.getElementById("output").innerText = "Rezultāti sagatavoti. Lejupielādējiet CSV.";
-                                downloadCsv(result);
-                            } else {
-                                // Ja rezultāts nesatur "Z_Difference", tas ir kļūdas ziņojums
-                                document.getElementById("output").innerText = result;
-                            }
-                        } catch (error) {
-                            console.error(error);
-                            document.getElementById("output").innerText = "Kļūda apstrādājot failus.";
-                        }
-                    };
+                        let result = await pyodide.runPythonAsync(code);
 
-                    // LAS failu apstrāde kā ArrayBuffer
-                    lasReader.readAsArrayBuffer(lasFile);
+                        if (result.includes("Z_Difference")) {
+                            document.getElementById("output").innerText = "Rezultāti sagatavoti. Lejupielādējiet CSV.";
+                            downloadCsv(result);
+                        } else {
+                            document.getElementById("output").innerText = result;
+                        }
+                    } catch (error) {
+                        console.error(error);
+                        document.getElementById("output").innerText = "Kļūda apstrādājot failus.";
+                    }
                 };
 
-                csvReader.readAsText(csvFile);
-            }
+                lasReader.readAsArrayBuffer(lasFile);
+            };
 
-            function downloadCsv(csvContent) {
-                if (!csvContent || csvContent === 'undefined') {
-                    alert("Nav ko lejupielādēt.");
-                    return;
-                }
-                let blob = new Blob([csvContent], { type: "text/csv" });
-                let link = document.createElement("a");
-                link.href = URL.createObjectURL(blob);
-                link.download = "las_vs_csv_results.csv";
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
+            csvReader.readAsText(csvFile);
+        }
+
+        function downloadCsv(csvContent) {
+            if (!csvContent || csvContent === 'undefined') {
+                alert("Nav ko lejupielādēt.");
+                return;
             }
-        </script>
-    </body>
+            let blob = new Blob([csvContent], { type: "text/csv" });
+            let link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = "las_vs_csv_results.csv";
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+    </script>
+</body>
 </html>
