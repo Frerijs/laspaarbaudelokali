@@ -16,15 +16,28 @@
     <input type="file" id="csvFile" accept=".csv"><br><br>
     
     <label for="distance">Maksimālais attālums (cm):</label>
-    <input type="number" id="distance" value="10"><br><br>
+    <input type="number" id="distance" value="10" min="1" step="1">
+    <button onclick="updateDistance()">Atjaunināt attālumu</button>
+    <p id="distanceDisplay">Izvēlētais attālums: 10 cm</p><br>
     
     <button onclick="processFiles()">Salīdzināt</button>
     <p id="output"></p>
 
     <script>
+        let maxDistance = 0.1; // Noklusējuma attālums (metros)
+
+        function updateDistance() {
+            let userDistance = parseFloat(document.getElementById("distance").value);
+            if (userDistance < 1) {
+                alert("Attālumam jābūt vismaz 1 cm!");
+                return;
+            }
+            maxDistance = userDistance / 100; // Pārvērš cm uz metrus
+            document.getElementById("distanceDisplay").innerText = "Izvēlētais attālums: " + userDistance + " cm";
+        }
+
         async function processFiles() {
             let csvFile = document.getElementById("csvFile").files[0];
-            let distance = parseFloat(document.getElementById("distance").value) / 100; // cm -> meters
 
             if (!csvFile) {
                 document.getElementById("output").innerText = "Lūdzu, augšupielādējiet CSV failu!";
@@ -51,10 +64,10 @@ las_points = np.random.rand(len(csv_points), 3) * 100  # Simulējam 100x100m pun
 
 # KDTree tuvāko punktu meklēšanai
 tree = cKDTree(las_points[:, :2])
-distances, indices = tree.query(csv_points[:, :2], distance_upper_bound=${distance})
+distances, indices = tree.query(csv_points[:, :2], distance_upper_bound=${maxDistance})
 
 # Aprēķinām Z atšķirību, ja punkts ir atrasts attālumā
-csv_df["Z_Difference"] = np.where(distances < ${distance}, csv_points[:, 2] - las_points[indices, 2], np.nan)
+csv_df["Z_Difference"] = np.where(distances < ${maxDistance}, csv_points[:, 2] - las_points[indices, 2], np.nan)
 
 csv_df.to_csv(index=False)
                 `;
