@@ -6,12 +6,9 @@
     <title>LAS un CSV Salīdzināšana</title>
     <script src="https://cdn.jsdelivr.net/pyodide/v0.23.4/full/pyodide.js"></script>
 
-    <!-- Pareizi ielādējam @loaders.gl -->
-    <script type="module">
-        import { load } from "@loaders.gl/core";
-        import { LASLoader } from "@loaders.gl/las";
-        window.loaders = { load, LASLoader }; // Padarām pieejamu visiem skriptiem
-    </script>
+    <!-- Pareizi ielādējam loaders.gl bibliotēku -->
+    <script src="https://unpkg.com/@loaders.gl/core@3.2.0/dist/dist.min.js"></script>
+    <script src="https://unpkg.com/@loaders.gl/las@3.2.0/dist/dist.min.js"></script>
 </head>
 <body>
     <h2>LAS & CSV Salīdzināšana</h2>
@@ -57,7 +54,7 @@
             let lasReader = new FileReader();
             lasReader.onload = async function(event) {
                 let lasArrayBuffer = event.target.result;
-                let lasData = await loaders.load(lasArrayBuffer, loaders.LASLoader);
+                let lasData = await loaders.gl.load(lasArrayBuffer, loaders.gl.LASLoader);
                 lasPoints = lasData.attributes.position.value;
 
                 // 2️⃣ Apstrādājam CSV failu ar Python (Pyodide)
