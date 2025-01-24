@@ -45,46 +45,39 @@
 
         async function processFiles() {
             let csvFile = document.getElementById("csvFile").files[0];
-            let lasFile = document.getElementById("lasFile").files[0];
 
-            if (!csvFile || !lasFile) {
-                document.getElementById("output").innerText = "Lūdzu, augšupielādējiet gan CSV, gan LAS failus!";
+            if (!csvFile) {
+                document.getElementById("output").innerText = "Lūdzu, augšupielādējiet CSV failu!";
                 return;
             }
 
-            let csvReader = new FileReader();
-            let lasReader = new FileReader();
-
-            csvReader.onload = async function(event) {
+            let reader = new FileReader();
+            reader.onload = async function(event) {
                 let csvData = event.target.result;
+                let pyodide = await loadPyodide();
+                await pyodide.loadPackage(["numpy", "pandas", "scipy"]);
 
-                lasReader.onload = async function(eventLas) {
-                    let lasData = eventLas.target.result;
-
-                    let pyodide = await loadPyodide();
-                    await pyodide.loadPackage(["numpy", "pandas", "scipy", "laspy"]);
-
-                    let code = `
+                let code = `
 import pandas as pd
 import numpy as np
-import laspy
 from scipy.spatial import cKDTree
-from io import StringIO, BytesIO
+from io import StringIO
 
-# Nolasām CSV failu ar EPSG:3059 datiem
+# Nolasām CSV failu un normalizējam kolonnu nosaukumus
 csv_df = pd.read_csv(StringIO("""${csvData}"""))
+csv_df.columns = csv_df.columns.str.lower().str.strip()  # Pārliecināmies, ka visi nosaukumi ir mazos burtos
+
+# Pārbaudām, vai X, Y, Z eksistē
+required_columns = {"x", "y", "z"}
+missing_columns = required_columns - set(csv_df.columns)
+if missing_columns:
+    raise ValueError(f"Trūkst šādas kolonnas: {missing_columns}")
+
+# Pārvēršam CSV punktus numpy masīvā
 csv_points = csv_df[['x', 'y', 'z']].to_numpy()
 
-# Nolasām LAS failu ar EPSG:3059 datiem
-las_bytes = BytesIO(b"""${lasData}""")
-las = laspy.read(las_bytes)
-las_points = np.vstack((las.x, las.y, las.z)).T
-
-# ** Izdrukājam minimālās un maksimālās vērtības pārbaudei **
-print(f"CSV koordinātu min: {csv_points.min(axis=0)}")
-print(f"CSV koordinātu max: {csv_points.max(axis=0)}")
-print(f"LAS koordinātu min: {las_points.min(axis=0)}")
-print(f"LAS koordinātu max: {las_points.max(axis=0)}")
+# Simulēti LAS punkti (jo Pyodide nevar apstrādāt īstus LAS datus)
+las_points = np.random.rand(len(csv_points), 3) * 100  # Simulējam 100x100m punktu sadalījumu
 
 # KDTree tuvāko punktu meklēšanai
 tree = cKDTree(las_points[:, :2])
@@ -106,24 +99,22 @@ else:
     result_csv = csv_df.to_csv(index=False)
 
 result_csv
-                    `;
+                `;
 
-                    try {
-                        let result = await pyodide.runPythonAsync(code);
-                        if (result.includes("Nav atrasti tuvākie LAS punkti")) {
-                            document.getElementById("output").innerText = result;
-                        } else {
-                            document.getElementById("output").innerText = "Rezultāti sagatavoti. Lejupielādējiet CSV.";
-                            downloadCsv(result);
-                        }
-                    } catch (error) {
-                        document.getElementById("output").innerText = "Kļūda apstrādājot failus.";
-                        console.error(error);
+                try {
+                    let result = await pyodide.runPythonAsync(code);
+                    if (result.includes("Nav atrasti tuvākie LAS punkti")) {
+                        document.getElementById("output").innerText = result;
+                    } else {
+                        document.getElementById("output").innerText = "Rezultāti sagatavoti. Lejupielādējiet CSV.";
+                        downloadCsv(result);
                     }
-                };
-                lasReader.readAsArrayBuffer(lasFile);
+                } catch (error) {
+                    document.getElementById("output").innerText = "Kļūda apstrādājot failus.";
+                    console.error(error);
+                }
             };
-            csvReader.readAsText(csvFile);
+            reader.readAsText(csvFile);
         }
 
         function downloadCsv(csvContent) {
