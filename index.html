@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>LAS un CSV Salīdzināšana</title>
 
-  <!-- 1) Pyodide (Python vide pārlūkā) -->
+  <!-- 1) Pyodide (Python vide) -->
   <script src="https://cdn.jsdelivr.net/pyodide/v0.23.4/full/pyodide.js"></script>
 
   <!-- 2) loaders.gl bibliotēkas (core + las) -->
@@ -30,7 +30,7 @@
   <p id="output"></p>
 
   <script>
-    // Strādājam ar attālumu metros; 10 cm = 0.1 m
+    // Iekšēji strādājam ar attālumu metros (10 cm = 0.1 m)
     let maxDistance = 0.1;
     let lasPoints = [];
 
@@ -55,10 +55,11 @@
         return;
       }
 
-      // Pārbaudām, vai loaders.gl skripti ir ielādēti
+      // Pārbaudām, vai tiešām esam ielādējuši loaders.gl
       if (!window.loaders || !window.loadersLAS) {
         console.error("loaders.gl nav pareizi ielādēts!");
-        document.getElementById("output").innerText = "Kļūda: loaders.gl nav ielādēts!";
+        document.getElementById("output").innerText =
+          "Kļūda: loaders.gl nav ielādēts!";
         return;
       }
 
@@ -68,10 +69,11 @@
         let lasArrayBuffer = event.target.result;
         let lasData;
         try {
+          // parse ar LASLoader
           lasData = await window.loaders.parse(
             lasArrayBuffer,
             window.loadersLAS.LASLoader,
-            {} // Papildu opcijas, ja nepieciešams
+            {}
           );
         } catch (error) {
           console.error("Kļūda parsējot LAS:", error);
@@ -82,7 +84,7 @@
 
         console.log("LAS Data:", lasData);
 
-        // Pārbaudām, vai mums ir POSITION masīvs
+        // Pārliecināmies, ka ir "POSITION" masīvs
         if (!lasData?.attributes?.POSITION?.value) {
           console.error("Kļūda: LAS failā nav atrasti X, Y, Z dati!");
           document.getElementById("output").innerText =
@@ -90,9 +92,9 @@
           return;
         }
 
-        // POSITION ir Float32Array [x1, y1, z1, x2, y2, z2, ...]
+        // Float32Array formātā: [x1, y1, z1, x2, y2, z2, ...]
         let positionsArray = lasData.attributes.POSITION.value;
-        // Saglabāsim masīvā, Python pusē pārrindosim Nx3 formātā
+        // Padarām to par parastu JS masīvu
         lasPoints = Array.from(positionsArray);
 
         // 2) Ielasām CSV
@@ -100,20 +102,19 @@
         csvReader.onload = async (e) => {
           let csvData = e.target.result;
 
-          // Ielādējam Pyodide un vajadzīgās pakotnes
+          // Ielādējam Pyodide + pakotnes
           let pyodide = await loadPyodide();
           await pyodide.loadPackage(["numpy", "pandas", "scipy"]);
 
-          // Glabājam LAS datus Pyodide iekšējā vidē
+          // Nododam las_points Python videi
           pyodide.globals.set("las_points", lasPoints);
 
-          // Python kods
           let code = `
 import pandas as pd
 import numpy as np
 from scipy.spatial import cKDTree
 from io import StringIO
-from js import las_points  # importējam masīvu no JS
+from js import las_points  # no JS importējam masīvu
 
 csv_df = pd.read_csv(StringIO("""${csvData}"""))
 csv_df.columns = csv_df.columns.str.upper().str.strip()
@@ -124,7 +125,7 @@ if not required_columns.issubset(csv_df.columns):
 
 csv_points = csv_df[['X', 'Y', 'Z']].to_numpy()
 
-# Pārveidojam JS las_points par Nx3 matricu (Float64)
+# Reshape Nx3 formātā
 las_points = np.array(las_points, dtype=np.float64).reshape(-1, 3)
 
 tree = cKDTree(las_points[:, :2])
@@ -144,16 +145,15 @@ else:
 
 result_csv
 `;
-
           try {
             // Izpildām Python kodu
             let result = await pyodide.runPythonAsync(code);
 
+            // Ja nav atrasti punkti
             if (result.includes("Nav atrasti tuvākie LAS punkti")) {
-              // Ja nav atrasti tuvi punkti
               document.getElementById("output").innerText = result;
             } else {
-              // Pretējā gadījumā tas ir CSV saturs
+              // Pretējā gadījumā tā ir CSV rindiņu virkne
               document.getElementById("output").innerText =
                 "Rezultāti sagatavoti. Lejupielādējiet CSV.";
               downloadCsv(result);
@@ -169,7 +169,6 @@ result_csv
       lasReader.readAsArrayBuffer(lasFile);
     }
 
-    // CSV lejupielāde
     function downloadCsv(csvContent) {
       let blob = new Blob([csvContent], { type: "text/csv" });
       let link = document.createElement("a");
