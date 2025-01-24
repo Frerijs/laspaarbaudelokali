@@ -14,9 +14,13 @@ body {
   box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
 }
 
-h2 {
+h1 {
   text-align: center;
   margin-bottom: 30px;
+}
+
+.uploader, .input-group, .download-buttons {
+  margin-bottom: 20px;
 }
 
 label {
@@ -35,7 +39,6 @@ button {
   padding: 10px 20px;
   font-size: 16px;
   cursor: pointer;
-  margin-top: 10px;
 }
 
 button:disabled {
@@ -43,8 +46,24 @@ button:disabled {
   cursor: not-allowed;
 }
 
-#output {
+#results table {
+  width: 100%;
+  border-collapse: collapse;
   margin-top: 20px;
-  font-weight: bold;
-  color: red; /* Izmaiņas, lai kļūdu ziņojumi būtu sarkani */
+}
+
+#results th, #results td {
+  border: 1px solid #ddd;
+  padding: 8px;
+  text-align: center;
+}
+
+#results th {
+  background-color: #f2f2f2;
+}
+
+#map {
+  height: 400px;
+  margin-top: 20px;
+  border: 1px solid #ddd;
 }
