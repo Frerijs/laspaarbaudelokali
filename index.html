@@ -45,29 +45,43 @@
 
         async function processFiles() {
             let csvFile = document.getElementById("csvFile").files[0];
+            let lasFile = document.getElementById("lasFile").files[0];
 
-            if (!csvFile) {
-                document.getElementById("output").innerText = "Lūdzu, augšupielādējiet CSV failu!";
+            if (!csvFile || !lasFile) {
+                document.getElementById("output").innerText = "Lūdzu, augšupielādējiet gan CSV, gan LAS failus!";
                 return;
             }
 
-            let reader = new FileReader();
-            reader.onload = async function(event) {
-                let csvData = event.target.result;
-                let pyodide = await loadPyodide();
-                await pyodide.loadPackage(["numpy", "pandas", "scipy"]);
+            let csvReader = new FileReader();
+            let lasReader = new FileReader();
 
-                let code = `
+            csvReader.onload = async function(event) {
+                let csvData = event.target.result;
+
+                lasReader.onload = async function(eventLas) {
+                    let lasData = eventLas.target.result;
+
+                    let pyodide = await loadPyodide();
+                    await pyodide.loadPackage(["numpy", "pandas", "scipy", "laspy"]);
+
+                    let code = `
 import pandas as pd
 import numpy as np
+import laspy
 from scipy.spatial import cKDTree
-from io import StringIO
+from io import StringIO, BytesIO
 
+# Nolasām CSV failu ar EPSG:3059 datiem
 csv_df = pd.read_csv(StringIO("""${csvData}"""))
 csv_points = csv_df[['x', 'y', 'z']].to_numpy()
 
-# Simulēti LAS punkti (šis ir piemērs, jo Pyodide nevar apstrādāt īstus LAS datus)
-las_points = np.random.rand(len(csv_points), 3) * 100  # Simulējam 100x100m punktu sadalījumu
+# Nolasām LAS failu ar EPSG:3059 datiem
+las_bytes = BytesIO(b"""${lasData}""")
+las = laspy.read(las_bytes)
+las_points = np.vstack((las.x, las.y, las.z)).T
+
+print(f"CSV punktu skaits: {len(csv_points)}")
+print(f"LAS punktu skaits: {len(las_points)}")
 
 # KDTree tuvāko punktu meklēšanai
 tree = cKDTree(las_points[:, :2])
@@ -89,22 +103,24 @@ else:
     result_csv = csv_df.to_csv(index=False)
 
 result_csv
-                `;
+                    `;
 
-                try {
-                    let result = await pyodide.runPythonAsync(code);
-                    if (result.includes("Nav atrasti tuvākie LAS punkti")) {
-                        document.getElementById("output").innerText = result;
-                    } else {
-                        document.getElementById("output").innerText = "Rezultāti sagatavoti. Lejupielādējiet CSV.";
-                        downloadCsv(result);
+                    try {
+                        let result = await pyodide.runPythonAsync(code);
+                        if (result.includes("Nav atrasti tuvākie LAS punkti")) {
+                            document.getElementById("output").innerText = result;
+                        } else {
+                            document.getElementById("output").innerText = "Rezultāti sagatavoti. Lejupielādējiet CSV.";
+                            downloadCsv(result);
+                        }
+                    } catch (error) {
+                        document.getElementById("output").innerText = "Kļūda apstrādājot failus.";
+                        console.error(error);
                     }
-                } catch (error) {
-                    document.getElementById("output").innerText = "Kļūda apstrādājot failus.";
-                    console.error(error);
-                }
+                };
+                lasReader.readAsArrayBuffer(lasFile);
             };
-            reader.readAsText(csvFile);
+            csvReader.readAsText(csvFile);
         }
 
         function downloadCsv(csvContent) {
