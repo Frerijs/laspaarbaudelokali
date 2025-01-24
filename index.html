@@ -5,6 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LAS un CSV Salīdzināšana</title>
     <script src="https://cdn.jsdelivr.net/pyodide/v0.23.4/full/pyodide.js"></script>
+
+    <!-- Pareizi ielādējam loaders.gl kā UMD (universālu) bibliotēku -->
+    <script src="https://unpkg.com/@loaders.gl/core@3.2.0/dist/dist.min.js"></script>
+    <script src="https://unpkg.com/@loaders.gl/las@3.2.0/dist/dist.min.js"></script>
 </head>
 <body>
     <h2>LAS & CSV Salīdzināšana</h2>
@@ -46,15 +50,18 @@
                 return;
             }
 
-            // 1️⃣ Dinamiski importējam `loaders.gl` moduļus
-            const { load } = await import("https://unpkg.com/@loaders.gl/core@3.2.0/dist/dist.min.js");
-            const { LASLoader } = await import("https://unpkg.com/@loaders.gl/las@3.2.0/dist/dist.min.js");
+            // 1️⃣ Pārbaudām, vai loaders.gl ir ielādēts pareizi
+            if (!window.loaders || !window.loaders.LASLoader) {
+                console.error("loaders.gl nav pareizi ielādēts!");
+                document.getElementById("output").innerText = "Kļūda: loaders.gl nav ielādēts!";
+                return;
+            }
 
             // 2️⃣ Apstrādājam LAS failu ar JavaScript
             let lasReader = new FileReader();
             lasReader.onload = async function(event) {
                 let lasArrayBuffer = event.target.result;
-                let lasData = await load(lasArrayBuffer, LASLoader);
+                let lasData = await window.loaders.load(lasArrayBuffer, window.loaders.LASLoader);
                 lasPoints = lasData.attributes.position.value;
 
                 // 3️⃣ Apstrādājam CSV failu ar Python (Pyodide)
