@@ -10,10 +10,6 @@
 
     <!-- Stili -->
     <link rel="stylesheet" href="styles.css">
-
-    <!-- Noņemam favicon, ja tāda nav, lai izvairītos no kļūdas -->
-    <!--<link rel="icon" type="image/png" href="favicon.ico">-->
-
 </head>
 <body>
     <div id="container">
@@ -77,9 +73,14 @@ las_points = np.random.rand(len(csv_points), 3) * 100  # Simulējam 100x100m pun
 tree = cKDTree(las_points[:, :2])
 distances, indices = tree.query(csv_points[:, :2], distance_upper_bound=${maxDistance})
 
-# Pārbaudām, vai kāds punkts tika atrasts noteiktajā attālumā
-valid_mask = distances < ${maxDistance}
-csv_df["Z_Difference"] = np.where(valid_mask, csv_points[:, 2] - las_points[indices, 2], np.nan)
+# Pārbaudām, vai atrastie indeksi ir derīgi
+valid_mask = (distances < ${maxDistance}) & (indices < len(las_points))
+
+# Ja indeksu nevar izmantot, iestatām NaN vērtības
+z_differences = np.full(len(csv_points), np.nan)
+z_differences[valid_mask] = csv_points[valid_mask, 2] - las_points[indices[valid_mask], 2]
+
+csv_df["Z_Difference"] = z_differences
 
 # Ja nav atrastu punktu, atgriežam paziņojumu
 if np.all(np.isnan(csv_df["Z_Difference"])):
