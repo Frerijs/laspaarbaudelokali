@@ -1,9 +1,25 @@
 <script>
-    window.onload = function() {
-        if (typeof Potree === "undefined") {
-            console.error("Potree is not loaded! Pārbaudi, vai fails tiek pareizi ielādēts.");
-        } else {
-            console.log("Potree veiksmīgi ielādēts!");
+    function loadLAS() {
+        let lasFile = document.getElementById("lasFile").files[0];
+
+        if (!lasFile) {
+            console.log("Lūdzu, izvēlies LAS failu.");
+            return;
         }
-    };
+
+        let reader = new FileReader();
+        reader.onload = function(event) {
+            let buffer = event.target.result;
+
+            try {
+                let pointCloud = Potree.loadPointCloud(buffer, "lasFile");
+                console.log("LAS faili veiksmīgi ielādēti:", pointCloud);
+                document.getElementById("output").innerText = "LAS fails veiksmīgi ielādēts!";
+            } catch (error) {
+                console.error("Kļūda ielādējot LAS failu:", error);
+            }
+        };
+
+        reader.readAsArrayBuffer(lasFile);
+    }
 </script>
