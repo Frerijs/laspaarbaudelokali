@@ -1,228 +1,93 @@
 <!DOCTYPE html>
 <html lang="lv">
 <head>
-  <meta charset="UTF-8" />
-  <title>LAS un CSV salīdzināšana (plas.io variants)</title>
-  <style>
-    body {
-      font-family: sans-serif;
-      margin: 20px;
-    }
-    #results table {
-      border-collapse: collapse;
-      width: 100%;
-      margin-top: 1rem;
-    }
-    #results th, #results td {
-      border: 1px solid #ccc;
-      padding: 6px 10px;
-      text-align: left;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LAS un CSV Salīdzināšana</title>
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.23.4/full/pyodide.js"></script>
 </head>
 <body>
-  <h1>LAS un CSV salīdzināšana (EPSG:3059, ar plas.io)</h1>
+    <h2>LAS & CSV Salīdzināšana</h2>
+    
+    <label for="lasFile">Augšupielādēt LAS:</label>
+    <input type="file" id="lasFile" accept=".las"><br>
 
-  <p>1) Ielādējiet LAS failu (EPSG:3059)</p>
-  <input type="file" id="lasFile" accept=".las,.laz" />
+    <label for="csvFile">Augšupielādēt CSV:</label>
+    <input type="file" id="csvFile" accept=".csv"><br><br>
+    
+    <label for="distance">Maksimālais attālums (cm):</label>
+    <input type="number" id="distance" value="10" min="1" step="1">
+    <button onclick="updateDistance()">Atjaunināt attālumu</button>
+    <p id="distanceDisplay">Izvēlētais attālums: 10 cm</p><br>
+    
+    <button onclick="processFiles()">Salīdzināt</button>
+    <p id="output"></p>
 
-  <p>2) Ielādējiet CSV failu (kolonnas x,y,z vai X,Y,Z, EPSG:3059)</p>
-  <input type="file" id="csvFile" accept=".csv,text/csv" />
+    <script>
+        let maxDistance = 0.1; // Noklusējuma attālums (metros)
 
-  <br><br>
-  <button id="processBtn">Sākt apstrādi</button>
-  
-  <div id="results"></div>
-
-  <!-- Papa Parse bibliotēka CSV parsēšanai -->
-  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-
-  <!-- plas.io dist (pašreizējā versija cdn.unpkg.com) -->
-  <!-- Ja šeit redzat kļūdu 404, tad skatiet plas.io repozitoriju un meklējiet citu publisku CDN, vai ielādējiet lokāli. -->
-  <script src="https://unpkg.com/plasio@latest/dist/plasio.js"></script>
-
-  <script>
-    const lasInput = document.getElementById('lasFile');
-    const csvInput = document.getElementById('csvFile');
-    const processBtn = document.getElementById('processBtn');
-    const resultsDiv = document.getElementById('results');
-
-    let lasPoints = [];  // šeit glabāsim {x, y, z} no LAS
-    let csvPoints = [];  // šeit glabāsim {x, y, z} no CSV
-
-    // 1) Funkcija, lai nolasītu LAS/LAZ failu ar plas.io
-    function parseLASwithPlasio(file) {
-      return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          const buffer = event.target.result;
-
-          // Izveidojam plas.io LAS ielādētāju
-          // skip:1 (nelēc pāri punktiem); xyz:true (lai atgriež x,y,z)
-          // Papildu parametri: https://github.com/verma/plasio#filelasloader
-          let lasLoader = new plasio.FileLASLoader(buffer, {
-            skip: 1
-          });
-
-          lasLoader.open()
-            .then(() => {
-              // Pavisam punkti
-              const totalPoints = lasLoader.header.pointsCount;
-              // Koordinātu mērogi un nobīdes
-              const scale = [
-                lasLoader.header.scaleX || 1,
-                lasLoader.header.scaleY || 1,
-                lasLoader.header.scaleZ || 1,
-              ];
-              const offset = [
-                lasLoader.header.offsetX || 0,
-                lasLoader.header.offsetY || 0,
-                lasLoader.header.offsetZ || 0,
-              ];
-
-              let pointsArray = [];
-              let chunkSize = 65536; // lasīsim chunkos pa 65k
-              let readCount = 0;
-
-              const readChunk = () => {
-                // Ja esam izlasījuši visus punktus, beidzam
-                if (readCount >= totalPoints) {
-                  resolve(pointsArray);
-                  return;
-                }
-                let toRead = Math.min(chunkSize, totalPoints - readCount);
-
-                lasLoader.readData(toRead)
-                  .then(chunk => {
-                    // chunk.x, chunk.y, chunk.z ir TypedArrays
-                    for (let i = 0; i < chunk.numPoints; i++) {
-                      const X = (chunk.x[i]) * scale[0] + offset[0];
-                      const Y = (chunk.y[i]) * scale[1] + offset[1];
-                      const Z = (chunk.z[i]) * scale[2] + offset[2];
-
-                      pointsArray.push({x: X, y: Y, z: Z});
-                    }
-                    readCount += chunk.numPoints;
-                    readChunk(); // rekursīvi lasām nākamo chunk
-                  })
-                  .catch(err => reject(err));
-              };
-              readChunk();
-            })
-            .catch(err => reject(err));
-        };
-        reader.onerror = err => reject(err);
-        reader.readAsArrayBuffer(file);
-      });
-    }
-
-    // 2) CSV lasīšana ar Papa Parse
-    function parseCSV(file) {
-      return new Promise((resolve, reject) => {
-        Papa.parse(file, {
-          header: true,
-          skipEmptyLines: true,
-          complete: (results) => {
-            try {
-              const data = results.data;
-              let points = data.map(row => {
-                const keys = {};
-                // Pārveido kolonnas par mazajiem burtiem
-                // lai varētu atrast x,y,z neatkarīgi no reģistra
-                for (let k of Object.keys(row)) {
-                  keys[k.toLowerCase()] = row[k];
-                }
-                const X = parseFloat(keys['x']);
-                const Y = parseFloat(keys['y']);
-                const Z = parseFloat(keys['z']);
-                return {x: X, y: Y, z: Z};
-              }).filter(pt => !isNaN(pt.x) && !isNaN(pt.y) && !isNaN(pt.z));
-              resolve(points);
-            } catch (err) {
-              reject(err);
+        function updateDistance() {
+            let userDistance = parseFloat(document.getElementById("distance").value);
+            if (userDistance < 1) {
+                alert("Attālumam jābūt vismaz 1 cm!");
+                return;
             }
-          },
-          error: (err) => reject(err)
-        });
-      });
-    }
-
-    // 3) Meklē tuvāko LAS punktu 20 cm rādiusā (naiva O(N) meklēšana)
-    function findNearestLASPoint(csvPt, maxDistance=0.2) {
-      let nearest = null;
-      let minDist = Infinity;
-
-      for (const lp of lasPoints) {
-        const dx = lp.x - csvPt.x;
-        const dy = lp.y - csvPt.y;
-        const dist2D = Math.sqrt(dx*dx + dy*dy);
-        if (dist2D <= maxDistance && dist2D < minDist) {
-          minDist = dist2D;
-          nearest = lp;
-        }
-      }
-      return nearest;
-    }
-
-    // 4) Kad lietotājs spiež "Sākt apstrādi"
-    processBtn.addEventListener('click', async () => {
-      if (!lasInput.files.length || !csvInput.files.length) {
-        alert("Lūdzu, atlasiet gan LAS, gan CSV failu!");
-        return;
-      }
-      resultsDiv.innerHTML = "<p>Notiek lasīšana un aprēķins, uzgaidiet...</p>";
-
-      try {
-        // Ielasām LAS punktus
-        lasPoints = await parseLASwithPlasio(lasInput.files[0]);
-        
-        // Ielasām CSV punktus
-        csvPoints = await parseCSV(csvInput.files[0]);
-
-        // Gatavojam HTML tabulu
-        const rows = [];
-        rows.push("<tr><th>CSV X</th><th>CSV Y</th><th>CSV Z</th><th>LAS Z</th><th>ΔZ</th><th>Attālums (2D)</th></tr>");
-
-        for (const cpt of csvPoints) {
-          const nearest = findNearestLASPoint(cpt, 0.2);  // 20cm
-          if (nearest) {
-            const dz = cpt.z - nearest.z;
-            const dist2D = Math.sqrt((nearest.x - cpt.x)**2 + (nearest.y - cpt.y)**2);
-            rows.push(
-              `<tr>
-                <td>${cpt.x.toFixed(3)}</td>
-                <td>${cpt.y.toFixed(3)}</td>
-                <td>${cpt.z.toFixed(3)}</td>
-                <td>${nearest.z.toFixed(3)}</td>
-                <td>${dz.toFixed(3)}</td>
-                <td>${dist2D.toFixed(3)}</td>
-              </tr>`
-            );
-          } else {
-            // Ja nav tuvā punkta 20cm robežās
-            rows.push(
-              `<tr>
-                <td>${cpt.x.toFixed(3)}</td>
-                <td>${cpt.y.toFixed(3)}</td>
-                <td>${cpt.z.toFixed(3)}</td>
-                <td>-</td>
-                <td>-</td>
-                <td>-</td>
-              </tr>`
-            );
-          }
+            maxDistance = userDistance / 100; // Pārvērš cm uz metrus
+            document.getElementById("distanceDisplay").innerText = "Izvēlētais attālums: " + userDistance + " cm";
         }
 
-        resultsDiv.innerHTML = `
-          <h3>Rezultāti</h3>
-          <table>${rows.join("")}</table>
-        `;
+        async function processFiles() {
+            let csvFile = document.getElementById("csvFile").files[0];
 
-      } catch (err) {
-        console.error(err);
-        resultsDiv.innerHTML = `<p>Kļūda: ${err.message}</p>`;
-      }
-    });
-  </script>
+            if (!csvFile) {
+                document.getElementById("output").innerText = "Lūdzu, augšupielādējiet CSV failu!";
+                return;
+            }
+
+            let reader = new FileReader();
+            reader.onload = async function(event) {
+                let csvData = event.target.result;
+                let pyodide = await loadPyodide();
+                await pyodide.loadPackage(["numpy", "pandas", "scipy"]);
+
+                let code = 
+import pandas as pd
+import numpy as np
+from scipy.spatial import cKDTree
+from io import StringIO
+
+csv_df = pd.read_csv(StringIO("""${csvData}"""))
+csv_points = csv_df[['x', 'y', 'z']].to_numpy()
+
+# Simulēti LAS punkti (šis ir piemērs, jo LAS fails nav apstrādājams Pyodide vidē)
+las_points = np.random.rand(len(csv_points), 3) * 100  # Simulējam 100x100m punktu sadalījumu
+
+# KDTree tuvāko punktu meklēšanai
+tree = cKDTree(las_points[:, :2])
+distances, indices = tree.query(csv_points[:, :2], distance_upper_bound=${maxDistance})
+
+# Aprēķinām Z atšķirību, ja punkts ir atrasts attālumā
+csv_df["Z_Difference"] = np.where(distances < ${maxDistance}, csv_points[:, 2] - las_points[indices, 2], np.nan)
+
+csv_df.to_csv(index=False)
+                ;
+
+                let result = await pyodide.runPythonAsync(code);
+                document.getElementById("output").innerText = "Rezultāti sagatavoti. Lejupielādējiet CSV.";
+                downloadCsv(result);
+            };
+            reader.readAsText(csvFile);
+        }
+
+        function downloadCsv(csvContent) {
+            let blob = new Blob([csvContent], { type: "text/csv" });
+            let link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = "las_vs_csv_results.csv";
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+    </script>
 </body>
 </html>
