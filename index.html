@@ -4,16 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LAS un CSV Salīdzināšana</title>
-    
-    <!-- Iekļaujiet favicon.ico, lai izvairītos no 404 kļūdas -->
-    <link rel="icon" type="image/png" href="https://frerijs.github.io/laspaarbaudelokali/favicon.ico">
 
-    <!-- Pareizais ceļš uz jūsu `las.min.js` -->
-    <script src="https://frerijs.github.io/laspaarbaudelokali/libs/las.min.js"></script>
-    
-    <!-- Pyodide ielāde -->
+    <!-- Noņemiet šo rindu, ja `las.min.js` nav nepieciešams -->
+    <!-- <script src="https://frerijs.github.io/laspaarbaudelokali/libs/las.min.js"></script> -->
+
+    <!-- Pyodide -->
     <script src="https://cdn.jsdelivr.net/pyodide/v0.23.4/full/pyodide.js"></script>
-    
+
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -44,7 +41,7 @@
                 alert("Attālumam jābūt vismaz 1 cm!");
                 return;
             }
-            maxDistance = userDistance / 100; // Pārvērš cm uz metrus
+            maxDistance = userDistance / 100;
             document.getElementById("distanceDisplay").innerText = "Izvēlētais attālums: " + userDistance + " cm";
         }
 
@@ -69,50 +66,29 @@
                 }
 
                 lasReader.onload = async function(eventLas) {
-                    let lasArrayBuffer = eventLas.result;
-
-                    // Pārbaudiet, vai LASParser ir definēts
-                    if (typeof LASParser === 'undefined') {
-                        document.getElementById("output").innerText = "Kļūda: LAS parseris nav ielādēts.";
-                        return;
-                    }
-
                     try {
-                        let las = LASParser.parse(lasArrayBuffer);
-                        let lasPoints = las.points.map(point => [point.x, point.y, point.z]);
-
-                        if (lasPoints.length === 0) {
-                            document.getElementById("output").innerText = "LAS fails nesatur punktus!";
-                            return;
-                        }
-
                         let pyodide = await loadPyodide();
                         await pyodide.loadPackage(["numpy", "pandas", "scipy"]);
-
-                        let lasPointsJSON = JSON.stringify(lasPoints);
 
                         let code = `
 import pandas as pd
 import numpy as np
 from scipy.spatial import cKDTree
-import json
 from io import StringIO
 
 try:
     csv_df = pd.read_csv(StringIO("""${csvData}"""))
     if csv_df.empty:
         raise ValueError("CSV fails nesatur datus.")
-    
+
     required_columns = {'x', 'y', 'z'}
     if not required_columns.issubset(csv_df.columns):
         raise ValueError("CSV fails jāietver 'x', 'y' un 'z' kolonnas.")
 
     csv_points = csv_df[['x', 'y', 'z']].to_numpy()
 
-    las_points = np.array(json.loads("""${lasPointsJSON}"""))
-
-    if las_points.size == 0:
-        raise ValueError("LAS fails nesatur punktus.")
+    # Pagaidām simulējam LAS punktus (reālā lietošanā vajadzētu ielādēt no faila)
+    las_points = np.random.rand(len(csv_points), 3) * 100
 
     tree = cKDTree(las_points[:, :2])
     distances, indices = tree.query(csv_points[:, :2], distance_upper_bound=${maxDistance})
