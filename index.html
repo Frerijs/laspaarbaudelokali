@@ -62,7 +62,17 @@
             lasReader.onload = async function(event) {
                 let lasArrayBuffer = event.target.result;
                 let lasData = await window.loaders.parse(lasArrayBuffer, window.loaders.LASLoader, {});
-                lasPoints = lasData.attributes.position.value;
+
+                console.log("LAS Data:", lasData); // Pārbaudām, kas ir iegūtajos datos
+
+                // Pārbaudām, vai dati satur koordinātas
+                if (lasData && lasData.attributes && lasData.attributes.position) {
+                    lasPoints = lasData.attributes.position.value;
+                } else {
+                    console.error("Kļūda: LAS failā nav atrastas koordinātas!");
+                    document.getElementById("output").innerText = "Kļūda: LAS failā nav atrastas koordinātas!";
+                    return;
+                }
 
                 // 3️⃣ Apstrādājam CSV failu ar Python (Pyodide)
                 let csvReader = new FileReader();
