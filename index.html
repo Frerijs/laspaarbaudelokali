@@ -83,8 +83,14 @@ mask = distances < ${maxDistance}
 # Inicializējiet Z_Difference ar NaN
 z_diff = np.full(len(csv_points), np.nan)
 
+# Pārbaudiet, vai indeksi ir derīgi, lai izvairītos no IndexError
+valid_indices = indices < len(las_points)
+
+# Aplikējiet masku, lai atzīmētu tikai derīgos punktus
+final_mask = mask & valid_indices
+
 # Aprēķiniet Z_Difference tikai tiem punktiem, kas atrodas attāluma robežās
-z_diff[mask] = csv_points[mask, 2] - las_points[indices[mask], 2]
+z_diff[final_mask] = csv_points[final_mask, 2] - las_points[indices[final_mask], 2]
 
 # Pievienojiet rezultātu DataFrame
 csv_df["Z_Difference"] = z_diff
@@ -104,6 +110,8 @@ result_csv = csv_df.to_csv(index=False)
                 };
 
                 // LAS failu apstrāde var prasīt citu metodi atkarībā no tā formāta
+                // Šeit tiek izmantots kā teksts, bet LAS ir binārs formāts
+                // Lai pareizi apstrādātu, nepieciešama LAS parser bibliotēka
                 lasReader.readAsText(lasFile);
             };
 
