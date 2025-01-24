@@ -11,27 +11,23 @@
     <div id="container">
         <h2>LAS & CSV Salīdzināšana</h2>
         
-        <div class="uploader">
-            <label for="lasFile">Augšupielādēt LAS:</label>
-            <input type="file" id="lasFile" accept=".las"><br>
+        <label for="lasFile">Augšupielādēt LAS:</label>
+        <input type="file" id="lasFile" accept=".las"><br>
+    
+        <label for="csvFile">Augšupielādēt CSV:</label>
+        <input type="file" id="csvFile" accept=".csv"><br><br>
         
-            <label for="csvFile">Augšupielādēt CSV:</label>
-            <input type="file" id="csvFile" accept=".csv"><br>
-        </div>
-        
-        <div class="input-group">
-            <label for="distance">Maksimālais attālums (cm):</label>
-            <input type="number" id="distance" value="10" min="1" step="1">
-            <button onclick="updateDistance()">Atjaunināt attālumu</button>
-            <p id="distanceDisplay">Izvēlētais attālums: 10 cm</p>
-        </div>
+        <label for="distance">Maksimālais attālums (cm):</label>
+        <input type="number" id="distance" value="10" min="1" step="1">
+        <button onclick="updateDistance()">Atjaunināt attālumu</button>
+        <p id="distanceDisplay">Izvēlētais attālums: 10 cm</p><br>
         
         <button onclick="processFiles()">Salīdzināt</button>
         <p id="output"></p>
     </div>
 
     <script>
-        let maxDistance = 0.1; // Default distance in meters
+        let maxDistance = 0.1; // Noklusējuma attālums (metros)
 
         function updateDistance() {
             let userDistance = parseFloat(document.getElementById("distance").value);
@@ -39,7 +35,7 @@
                 alert("Attālumam jābūt vismaz 1 cm!");
                 return;
             }
-            maxDistance = userDistance / 100; // Convert cm to meters
+            maxDistance = userDistance / 100; // Pārvērš cm uz metrus
             document.getElementById("distanceDisplay").innerText = "Izvēlētais attālums: " + userDistance + " cm";
         }
 
@@ -55,44 +51,45 @@
             let csvReader = new FileReader();
             let lasReader = new FileReader();
 
-            // Read CSV File
             csvReader.onload = async function(event) {
                 let csvData = event.target.result;
 
-                // Read LAS File
                 lasReader.onload = async function(eventLas) {
                     let lasData = eventLas.result;
 
-                    // Initialize Pyodide
                     let pyodide = await loadPyodide();
                     await pyodide.loadPackage(["numpy", "pandas", "scipy"]);
 
-                    // Pass CSV and LAS data to Python
-                    // Note: Pyodide cannot directly parse LAS files. You need to convert LAS to a readable format (e.g., CSV or JSON) beforehand.
-                    // Alternatively, use a JavaScript library to parse LAS files and pass the data to Python.
-
-                    // For demonstration, we'll simulate LAS points as before.
                     let code = `
 import pandas as pd
 import numpy as np
 from scipy.spatial import cKDTree
 from io import StringIO
 
-# Load CSV data
+# Ielādē CSV datus
 csv_df = pd.read_csv(StringIO("""${csvData}"""))
 csv_points = csv_df[['x', 'y', 'z']].to_numpy()
 
-# Simulated LAS points (replace this with actual LAS data processing)
-las_points = np.random.rand(len(csv_points), 3) * 100  # Simulated 100x100m point distribution
+# Simulēti LAS punkti (aizvietojiet ar reālo LAS datu apstrādi)
+las_points = np.random.rand(len(csv_points), 3) * 100  # Simulējam 100x100m punktu sadalījumu
 
-# Build KDTree for LAS points
+# Izveidojiet KDTree priekš LAS punktiem
 tree = cKDTree(las_points[:, :2])
 distances, indices = tree.query(csv_points[:, :2], distance_upper_bound=${maxDistance})
 
-# Calculate Z difference if within the specified distance
-csv_df["Z_Difference"] = np.where(distances < ${maxDistance}, csv_points[:, 2] - las_points[indices, 2], np.nan)
+# Izveidojiet masku, kas nosaka derīgos indeksus
+mask = distances < ${maxDistance}
 
-# Convert the result to CSV
+# Inicializējiet Z_Difference ar NaN
+z_diff = np.full(len(csv_points), np.nan)
+
+# Aprēķiniet Z_Difference tikai tiem punktiem, kas atrodas attāluma robežās
+z_diff[mask] = csv_points[mask, 2] - las_points[indices[mask], 2]
+
+# Pievienojiet rezultātu DataFrame
+csv_df["Z_Difference"] = z_diff
+
+# Konvertējiet rezultātu uz CSV
 result_csv = csv_df.to_csv(index=False)
                     `;
 
@@ -106,10 +103,8 @@ result_csv = csv_df.to_csv(index=False)
                     }
                 };
 
-                // Read LAS file as ArrayBuffer or appropriate format
-                // Here we read it as text for simplicity, but LAS is a binary format
-                // You need to parse it correctly using a LAS parser
-                lasReader.readAsArrayBuffer(lasFile);
+                // LAS failu apstrāde var prasīt citu metodi atkarībā no tā formāta
+                lasReader.readAsText(lasFile);
             };
 
             csvReader.readAsText(csvFile);
