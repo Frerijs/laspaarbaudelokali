@@ -50,7 +50,7 @@
                 let pyodide = await loadPyodide();
                 await pyodide.loadPackage(["numpy", "pandas", "scipy"]);
 
-                let code = 
+                let code = `
 import pandas as pd
 import numpy as np
 from scipy.spatial import cKDTree
@@ -69,12 +69,19 @@ distances, indices = tree.query(csv_points[:, :2], distance_upper_bound=${maxDis
 # Aprēķinām Z atšķirību, ja punkts ir atrasts attālumā
 csv_df["Z_Difference"] = np.where(distances < ${maxDistance}, csv_points[:, 2] - las_points[indices, 2], np.nan)
 
-csv_df.to_csv(index=False)
-                ;
+# Sagatavojam CSV rezultātu
+result_csv = csv_df.to_csv(index=False)
+result_csv
+                `;
 
-                let result = await pyodide.runPythonAsync(code);
-                document.getElementById("output").innerText = "Rezultāti sagatavoti. Lejupielādējiet CSV.";
-                downloadCsv(result);
+                try {
+                    let result = await pyodide.runPythonAsync(code);
+                    document.getElementById("output").innerText = "Rezultāti sagatavoti. Lejupielādējiet CSV.";
+                    downloadCsv(result);
+                } catch (error) {
+                    document.getElementById("output").innerText = "Kļūda apstrādājot failus.";
+                    console.error(error);
+                }
             };
             reader.readAsText(csvFile);
         }
