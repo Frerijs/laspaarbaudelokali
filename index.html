@@ -1,26 +1,21 @@
 <!DOCTYPE html>
 <html lang="lv">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>LAS un CSV Salīdzināšana</title>
-
-  <!-- 1) Pyodide (Python vide) -->
+  <meta charset="UTF-8">
+  <title>LAS & CSV Salīdzināšana</title>
+  <!-- 1) Pyodide -->
   <script src="https://cdn.jsdelivr.net/pyodide/v0.23.4/full/pyodide.js"></script>
-
-  <!-- 2) loaders.gl bibliotēkas (core + las) -->
-  <script src="https://unpkg.com/@loaders.gl/core@3.3.2/dist/dist.min.js"></script>
-  <script src="https://unpkg.com/@loaders.gl/las@3.3.2/dist/dist.min.js"></script>
+  <!-- 2) loaders.gl (core + las) -->
+  <script src="https://cdn.jsdelivr.net/npm/@loaders.gl/core@3.3.2/dist/core.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@loaders.gl/las@3.3.2/dist/las.min.js"></script>
 </head>
 <body>
   <h2>LAS & CSV Salīdzināšana</h2>
-
   <label for="lasFile">Augšupielādēt LAS:</label>
   <input type="file" id="lasFile" accept=".las"><br>
-
   <label for="csvFile">Augšupielādēt CSV:</label>
   <input type="file" id="csvFile" accept=".csv"><br><br>
-  
+
   <label for="distance">Maksimālais attālums (cm):</label>
   <input type="number" id="distance" value="10" min="1" step="1">
   <button onclick="updateDistance()">Atjaunināt attālumu</button>
@@ -30,32 +25,31 @@
   <p id="output"></p>
 
   <script>
-    // Iekšēji strādājam ar attālumu metros (10 cm = 0.1 m)
+    // Iekšēji metri (10 cm = 0.1 m)
     let maxDistance = 0.1;
     let lasPoints = [];
 
     function updateDistance() {
-      let userDistance = parseFloat(document.getElementById("distance").value);
-      if (userDistance < 1) {
+      let distCm = parseFloat(document.getElementById("distance").value);
+      if (distCm < 1) {
         alert("Attālumam jābūt vismaz 1 cm!");
         return;
       }
-      maxDistance = userDistance / 100; // cm -> m
+      maxDistance = distCm / 100;
       document.getElementById("distanceDisplay").innerText =
-        "Izvēlētais attālums: " + userDistance + " cm";
+        "Izvēlētais attālums: " + distCm + " cm";
     }
 
     async function processFiles() {
       let csvFile = document.getElementById("csvFile").files[0];
       let lasFile = document.getElementById("lasFile").files[0];
-
       if (!csvFile || !lasFile) {
         document.getElementById("output").innerText =
           "Lūdzu, augšupielādējiet gan CSV, gan LAS failus!";
         return;
       }
 
-      // Pārbaudām, vai tiešām esam ielādējuši loaders.gl
+      // Pārbaudām, vai loaders.gl ielādēts
       if (!window.loaders || !window.loadersLAS) {
         console.error("loaders.gl nav pareizi ielādēts!");
         document.getElementById("output").innerText =
@@ -66,66 +60,61 @@
       // 1) Ielasām LAS
       let lasReader = new FileReader();
       lasReader.onload = async (event) => {
-        let lasArrayBuffer = event.target.result;
+        let lasBuffer = event.target.result;
         let lasData;
         try {
-          // parse ar LASLoader
           lasData = await window.loaders.parse(
-            lasArrayBuffer,
+            lasBuffer,
             window.loadersLAS.LASLoader,
-            {}
+            {} // papildu opcijas
           );
-        } catch (error) {
-          console.error("Kļūda parsējot LAS:", error);
+        } catch (e) {
+          console.error("Kļūda parsējot LAS:", e);
           document.getElementById("output").innerText =
             "Kļūda: Nevar nolasīt LAS failu!";
           return;
         }
 
-        console.log("LAS Data:", lasData);
-
-        // Pārliecināmies, ka ir "POSITION" masīvs
         if (!lasData?.attributes?.POSITION?.value) {
-          console.error("Kļūda: LAS failā nav atrasti X, Y, Z dati!");
+          console.error("Kļūda: nav atrasti X,Y,Z dati LAS failā!");
           document.getElementById("output").innerText =
-            "Kļūda: LAS failā nav atrasti X, Y, Z dati!";
+            "Kļūda: nav atrasti X,Y,Z dati LAS failā!";
           return;
         }
 
-        // Float32Array formātā: [x1, y1, z1, x2, y2, z2, ...]
+        // Float32Array [x1, y1, z1, x2, y2, z2,...]
         let positionsArray = lasData.attributes.POSITION.value;
-        // Padarām to par parastu JS masīvu
-        lasPoints = Array.from(positionsArray);
+        lasPoints = Array.from(positionsArray); // glabājam JS masīvā
 
         // 2) Ielasām CSV
         let csvReader = new FileReader();
-        csvReader.onload = async (e) => {
-          let csvData = e.target.result;
+        csvReader.onload = async (ev) => {
+          let csvData = ev.target.result;
 
-          // Ielādējam Pyodide + pakotnes
+          // Pyodide + pakotnes
           let pyodide = await loadPyodide();
           await pyodide.loadPackage(["numpy", "pandas", "scipy"]);
 
-          // Nododam las_points Python videi
+          // Nododam lasPoints Python videi
           pyodide.globals.set("las_points", lasPoints);
 
-          let code = `
+          let pythonCode = `
 import pandas as pd
 import numpy as np
 from scipy.spatial import cKDTree
 from io import StringIO
-from js import las_points  # no JS importējam masīvu
+from js import las_points
 
 csv_df = pd.read_csv(StringIO("""${csvData}"""))
 csv_df.columns = csv_df.columns.str.upper().str.strip()
 
-required_columns = {"X", "Y", "Z"}
-if not required_columns.issubset(csv_df.columns):
-    raise ValueError(f"Trūkst šādas kolonnas: {required_columns - set(csv_df.columns)}")
+required = {"X","Y","Z"}
+if not required.issubset(csv_df.columns):
+    raise ValueError(f"Trūkst kolonnas: {required - set(csv_df.columns)}")
 
-csv_points = csv_df[['X', 'Y', 'Z']].to_numpy()
+csv_points = csv_df[['X','Y','Z']].to_numpy()
 
-# Reshape Nx3 formātā
+# Reshape Nx3
 las_points = np.array(las_points, dtype=np.float64).reshape(-1, 3)
 
 tree = cKDTree(las_points[:, :2])
@@ -133,10 +122,10 @@ distances, indices = tree.query(csv_points[:, :2], distance_upper_bound=${maxDis
 
 valid_mask = (distances < ${maxDistance}) & (indices >= 0) & (indices < len(las_points))
 
-z_differences = np.full(len(csv_points), np.nan)
-z_differences[valid_mask] = csv_points[valid_mask, 2] - las_points[indices[valid_mask], 2]
+z_diff = np.full(len(csv_points), np.nan)
+z_diff[valid_mask] = csv_points[valid_mask,2] - las_points[indices[valid_mask],2]
 
-csv_df["Z_Difference"] = z_differences
+csv_df["Z_Difference"] = z_diff
 
 if np.all(np.isnan(csv_df["Z_Difference"])):
     result_csv = "Nav atrasti tuvākie LAS punkti noteiktajā attālumā."
@@ -146,22 +135,19 @@ else:
 result_csv
 `;
           try {
-            // Izpildām Python kodu
-            let result = await pyodide.runPythonAsync(code);
-
-            // Ja nav atrasti punkti
-            if (result.includes("Nav atrasti tuvākie LAS punkti")) {
+            let result = await pyodide.runPythonAsync(pythonCode);
+            if (result.includes("Nav atrasti tuvākie LAS")) {
               document.getElementById("output").innerText = result;
             } else {
-              // Pretējā gadījumā tā ir CSV rindiņu virkne
+              // Rezultāts ir CSV saturs
               document.getElementById("output").innerText =
                 "Rezultāti sagatavoti. Lejupielādējiet CSV.";
               downloadCsv(result);
             }
-          } catch (error) {
+          } catch (err) {
+            console.error("Kļūda apstrādājot CSV+LAS:", err);
             document.getElementById("output").innerText =
               "Kļūda apstrādājot failus.";
-            console.error(error);
           }
         };
         csvReader.readAsText(csvFile);
@@ -170,7 +156,7 @@ result_csv
     }
 
     function downloadCsv(csvContent) {
-      let blob = new Blob([csvContent], { type: "text/csv" });
+      let blob = new Blob([csvContent], {type: "text/csv"});
       let link = document.createElement("a");
       link.href = URL.createObjectURL(blob);
       link.download = "las_vs_csv_results.csv";
