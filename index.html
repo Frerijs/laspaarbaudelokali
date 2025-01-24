@@ -80,8 +80,11 @@ las_bytes = BytesIO(b"""${lasData}""")
 las = laspy.read(las_bytes)
 las_points = np.vstack((las.x, las.y, las.z)).T
 
-print(f"CSV punktu skaits: {len(csv_points)}")
-print(f"LAS punktu skaits: {len(las_points)}")
+# ** Izdrukājam minimālās un maksimālās vērtības pārbaudei **
+print(f"CSV koordinātu min: {csv_points.min(axis=0)}")
+print(f"CSV koordinātu max: {csv_points.max(axis=0)}")
+print(f"LAS koordinātu min: {las_points.min(axis=0)}")
+print(f"LAS koordinātu max: {las_points.max(axis=0)}")
 
 # KDTree tuvāko punktu meklēšanai
 tree = cKDTree(las_points[:, :2])
