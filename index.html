@@ -5,8 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LAS un CSV Salīdzināšana</title>
     <script src="https://cdn.jsdelivr.net/pyodide/v0.23.4/full/pyodide.js"></script>
-
-    <!-- Pareizi ielādējam loaders.gl kā UMD bibliotēku -->
     <script src="https://unpkg.com/@loaders.gl/core@3.2.0/dist/dist.min.js"></script>
     <script src="https://unpkg.com/@loaders.gl/las@3.2.0/dist/dist.min.js"></script>
 </head>
@@ -50,31 +48,25 @@
                 return;
             }
 
-            // 1️⃣ Pārbaudām, vai loaders.gl ir ielādēts pareizi
             if (!window.loaders || !window.loaders.LASLoader || !window.loaders.parse) {
                 console.error("loaders.gl nav pareizi ielādēts!");
                 document.getElementById("output").innerText = "Kļūda: loaders.gl nav ielādēts!";
                 return;
             }
 
-            // 2️⃣ Apstrādājam LAS failu ar JavaScript
             let lasReader = new FileReader();
             lasReader.onload = async function(event) {
                 let lasArrayBuffer = event.target.result;
                 let lasData = await window.loaders.parse(lasArrayBuffer, window.loaders.LASLoader, {});
 
-                console.log("LAS Data:", lasData); // Pārbaudām, kas ir iegūtajos datos
+                console.log("LAS Data:", lasData);
 
-                // 🔹 Meklējam iespējamos X, Y, Z atribūtus
                 if (lasData && lasData.attributes) {
-                    let possibleAttributes = Object.keys(lasData.attributes);
-                    console.log("Pieejamie LAS atribūti:", possibleAttributes);
+                    let x_attr = "X";
+                    let y_attr = "Y";
+                    let z_attr = "Z";
 
-                    let x_attr = possibleAttributes.find(attr => attr.toLowerCase().includes("x"));
-                    let y_attr = possibleAttributes.find(attr => attr.toLowerCase().includes("y"));
-                    let z_attr = possibleAttributes.find(attr => attr.toLowerCase().includes("z"));
-
-                    if (x_attr && y_attr && z_attr) {
+                    if (lasData.attributes[x_attr] && lasData.attributes[y_attr] && lasData.attributes[z_attr]) {
                         lasPoints = lasData.attributes[x_attr].value.map((_, i) => [
                             lasData.attributes[x_attr].value[i],
                             lasData.attributes[y_attr].value[i],
@@ -91,14 +83,12 @@
                     return;
                 }
 
-                // 3️⃣ Apstrādājam CSV failu ar Python (Pyodide)
                 let csvReader = new FileReader();
                 csvReader.onload = async function(event) {
                     let csvData = event.target.result;
                     let pyodide = await loadPyodide();
                     await pyodide.loadPackage(["numpy", "pandas", "scipy"]);
 
-                    // 🔹 Saglabājam datus Pyodide vidē (Izmantojam `pyodide.globals`)
                     pyodide.globals.set("las_points", lasPoints);
 
                     let code = `
@@ -108,13 +98,13 @@ from scipy.spatial import cKDTree
 from io import StringIO
 
 csv_df = pd.read_csv(StringIO("""${csvData}"""))
-csv_df.columns = csv_df.columns.str.lower().str.strip()
+csv_df.columns = csv_df.columns.str.upper().str.strip()
 
-required_columns = {"x", "y", "z"}
+required_columns = {"X", "Y", "Z"}
 if not required_columns.issubset(csv_df.columns):
     raise ValueError(f"Trūkst šādas kolonnas: {required_columns - set(csv_df.columns)}")
 
-csv_points = csv_df[['x', 'y', 'z']].to_numpy()
+csv_points = csv_df[['X', 'Y', 'Z']].to_numpy()
 las_points = np.array(pyodide.globals.get("las_points"))
 
 tree = cKDTree(las_points[:, :2])
