@@ -23,13 +23,6 @@
     <button onclick="processFiles()">Salīdzināt</button>
     <p id="output"></p>
 
-    <script type="module">
-        import { load } from "https://unpkg.com/@loaders.gl/core@3.2.0";
-        import { LASLoader } from "https://unpkg.com/@loaders.gl/las@3.2.0";
-
-        window.loaders = { load, LASLoader };
-    </script>
-
     <script>
         let maxDistance = 0.1;
         let lasPoints = [];
@@ -53,14 +46,18 @@
                 return;
             }
 
-            // 1️⃣ Apstrādājam LAS failu ar JavaScript
+            // 1️⃣ Dinamiski importējam `loaders.gl` moduļus
+            const { load } = await import("https://unpkg.com/@loaders.gl/core@3.2.0/dist/dist.min.js");
+            const { LASLoader } = await import("https://unpkg.com/@loaders.gl/las@3.2.0/dist/dist.min.js");
+
+            // 2️⃣ Apstrādājam LAS failu ar JavaScript
             let lasReader = new FileReader();
             lasReader.onload = async function(event) {
                 let lasArrayBuffer = event.target.result;
-                let lasData = await loaders.load(lasArrayBuffer, loaders.LASLoader);
+                let lasData = await load(lasArrayBuffer, LASLoader);
                 lasPoints = lasData.attributes.position.value;
 
-                // 2️⃣ Apstrādājam CSV failu ar Python (Pyodide)
+                // 3️⃣ Apstrādājam CSV failu ar Python (Pyodide)
                 let csvReader = new FileReader();
                 csvReader.onload = async function(event) {
                     let csvData = event.target.result;
