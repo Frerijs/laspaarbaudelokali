@@ -65,12 +65,20 @@
 
                 console.log("LAS Data:", lasData); // Pārbaudām, kas ir iegūtajos datos
 
-                // Pārbaudām, vai dati satur koordinātas
-                if (lasData && lasData.attributes && lasData.attributes.position) {
-                    lasPoints = lasData.attributes.position.value;
+                // 🔹 Pārbaudām, vai dati satur koordinātas
+                if (lasData && lasData.attributes) {
+                    if (lasData.attributes.position) {
+                        lasPoints = lasData.attributes.position.value;
+                    } else if (lasData.attributes.POSITION) { // Alternatīva pārbaude
+                        lasPoints = lasData.attributes.POSITION.value;
+                    } else {
+                        console.error("Kļūda: LAS failā nav atrastas koordinātas!");
+                        document.getElementById("output").innerText = "Kļūda: LAS failā nav atrastas koordinātas!";
+                        return;
+                    }
                 } else {
-                    console.error("Kļūda: LAS failā nav atrastas koordinātas!");
-                    document.getElementById("output").innerText = "Kļūda: LAS failā nav atrastas koordinātas!";
+                    console.error("Kļūda: LAS dati nav korekti!");
+                    document.getElementById("output").innerText = "Kļūda: LAS dati nav korekti!";
                     return;
                 }
 
