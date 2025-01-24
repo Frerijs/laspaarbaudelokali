@@ -2,22 +2,11 @@
 <html lang="lv">
 <head>
   <meta charset="UTF-8" />
-  <title>LAS un CSV Z atšķirību salīdzināšana (EPSG:3059)</title>
+  <title>LAS un CSV salīdzināšana (plas.io variants)</title>
   <style>
     body {
       font-family: sans-serif;
       margin: 20px;
-    }
-    #dropZone {
-      width: 100%;
-      height: 60px;
-      border: 2px dashed #ccc;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin-bottom: 10px;
-      color: #666;
-      cursor: pointer;
     }
     #results table {
       border-collapse: collapse;
@@ -32,7 +21,7 @@
   </style>
 </head>
 <body>
-  <h1>LAS un CSV salīdzināšana (EPSG:3059)</h1>
+  <h1>LAS un CSV salīdzināšana (EPSG:3059, ar plas.io)</h1>
 
   <p>1) Ielādējiet LAS failu (EPSG:3059)</p>
   <input type="file" id="lasFile" accept=".las,.laz" />
@@ -47,10 +36,10 @@
 
   <!-- Papa Parse bibliotēka CSV parsēšanai -->
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-  
-  <!-- laslaz.js bibliotēka no Potree CDN. -->
-  <!-- Brīdinājums: starp versijām var būt atšķirības. -->
-  <script src="https://cdn.potree.org/potree/2.1/libs/laslaz/laslaz.js"></script>
+
+  <!-- plas.io dist (pašreizējā versija cdn.unpkg.com) -->
+  <!-- Ja šeit redzat kļūdu 404, tad skatiet plas.io repozitoriju un meklējiet citu publisku CDN, vai ielādējiet lokāli. -->
+  <script src="https://unpkg.com/plasio@latest/dist/plasio.js"></script>
 
   <script>
     const lasInput = document.getElementById('lasFile');
@@ -58,61 +47,76 @@
     const processBtn = document.getElementById('processBtn');
     const resultsDiv = document.getElementById('results');
 
-    let lasPoints = [];  // Te saglabāsim LAS punktus [ {x, y, z}, ... ]
-    let csvPoints = [];  // Te saglabāsim CSV punktus [ {x, y, z}, ... ]
+    let lasPoints = [];  // šeit glabāsim {x, y, z} no LAS
+    let csvPoints = [];  // šeit glabāsim {x, y, z} no CSV
 
-    // ==============================================================
-    // 1) LAS faila ielāde un parsēšana, izmantojot LASLAZ (Potree)
-    // ==============================================================
-    function parseLAS(file) {
+    // 1) Funkcija, lai nolasītu LAS/LAZ failu ar plas.io
+    function parseLASwithPlasio(file) {
       return new Promise((resolve, reject) => {
         const reader = new FileReader();
-        reader.onload = function(e) {
-          const buffer = e.target.result;
-          LASModule.onRuntimeInitialized = () => {
-            try {
-              const las = new LASModule.LASFile(new Uint8Array(buffer));
-              las.open();
+        reader.onload = (event) => {
+          const buffer = event.target.result;
 
-              // Šajā piemērā izlasīsim *visus* punktus.
-              // Lieliem failiem tas var būt ļoti lēns un prasīt daudz atmiņas.
-              // Reālās sistēmās vēlams izmantot strīmošanu vai telpiskos indeksus.
-              const totalPoints = las.header.pointsCount;
-              const reader = new LASModule.LASDecoder(las, las.header);
+          // Izveidojam plas.io LAS ielādētāju
+          // skip:1 (nelēc pāri punktiem); xyz:true (lai atgriež x,y,z)
+          // Papildu parametri: https://github.com/verma/plasio#filelasloader
+          let lasLoader = new plasio.FileLASLoader(buffer, {
+            skip: 1
+          });
 
-              const pointsArray = [];
-              for (let i = 0; i < totalPoints; i++) {
-                const p = reader.getPoint(i);
-                // p.x, p.y, p.z - jau atgriezti "reālajās" vienībās?
-                // Dažādām laslaz.js versijām formāti var nedaudz atšķirties,
-                // iespējams, jālieto scale no las.header.scale, offset no las.header.offset.
-                
-                const scale = las.header.scale;
-                const offset = las.header.offset;
-                const X = p.x * scale[0] + offset[0];
-                const Y = p.y * scale[1] + offset[1];
-                const Z = p.z * scale[2] + offset[2];
+          lasLoader.open()
+            .then(() => {
+              // Pavisam punkti
+              const totalPoints = lasLoader.header.pointsCount;
+              // Koordinātu mērogi un nobīdes
+              const scale = [
+                lasLoader.header.scaleX || 1,
+                lasLoader.header.scaleY || 1,
+                lasLoader.header.scaleZ || 1,
+              ];
+              const offset = [
+                lasLoader.header.offsetX || 0,
+                lasLoader.header.offsetY || 0,
+                lasLoader.header.offsetZ || 0,
+              ];
 
-                pointsArray.push({x: X, y: Y, z: Z});
-              }
-              lasPoints = pointsArray;
+              let pointsArray = [];
+              let chunkSize = 65536; // lasīsim chunkos pa 65k
+              let readCount = 0;
 
-              las.close();
-              las = null;
-              resolve();
-            } catch (err) {
-              reject(err);
-            }
-          }
+              const readChunk = () => {
+                // Ja esam izlasījuši visus punktus, beidzam
+                if (readCount >= totalPoints) {
+                  resolve(pointsArray);
+                  return;
+                }
+                let toRead = Math.min(chunkSize, totalPoints - readCount);
+
+                lasLoader.readData(toRead)
+                  .then(chunk => {
+                    // chunk.x, chunk.y, chunk.z ir TypedArrays
+                    for (let i = 0; i < chunk.numPoints; i++) {
+                      const X = (chunk.x[i]) * scale[0] + offset[0];
+                      const Y = (chunk.y[i]) * scale[1] + offset[1];
+                      const Z = (chunk.z[i]) * scale[2] + offset[2];
+
+                      pointsArray.push({x: X, y: Y, z: Z});
+                    }
+                    readCount += chunk.numPoints;
+                    readChunk(); // rekursīvi lasām nākamo chunk
+                  })
+                  .catch(err => reject(err));
+              };
+              readChunk();
+            })
+            .catch(err => reject(err));
         };
         reader.onerror = err => reject(err);
         reader.readAsArrayBuffer(file);
       });
     }
 
-    // ==============================================================
-    // 2) CSV faila ielāde un parsēšana ar Papa Parse
-    // ==============================================================
+    // 2) CSV lasīšana ar Papa Parse
     function parseCSV(file) {
       return new Promise((resolve, reject) => {
         Papa.parse(file, {
@@ -121,110 +125,102 @@
           complete: (results) => {
             try {
               const data = results.data;
-              // Mēģinām atrast kolonnas x,y,z vai X,Y,Z (ignorējot reģistru)
-              // un konvertējam iekš [ {x, y, z}, ... ]
-              csvPoints = data.map(row => {
-                // Kolonnu nosaukumi var būt x/X, y/Y, z/Z
-                // Pielietosim mazos burtus un tad ielasīsim.
-                const keys = Object.keys(row).reduce((acc, k) => {
-                  acc[k.toLowerCase()] = row[k];
-                  return acc;
-                }, {});
-
+              let points = data.map(row => {
+                const keys = {};
+                // Pārveido kolonnas par mazajiem burtiem
+                // lai varētu atrast x,y,z neatkarīgi no reģistra
+                for (let k of Object.keys(row)) {
+                  keys[k.toLowerCase()] = row[k];
+                }
                 const X = parseFloat(keys['x']);
                 const Y = parseFloat(keys['y']);
                 const Z = parseFloat(keys['z']);
                 return {x: X, y: Y, z: Z};
               }).filter(pt => !isNaN(pt.x) && !isNaN(pt.y) && !isNaN(pt.z));
-
-              resolve();
+              resolve(points);
             } catch (err) {
               reject(err);
             }
           },
-          error: (err) => {
-            reject(err);
-          }
+          error: (err) => reject(err)
         });
       });
     }
 
-    // ==============================================================
-    // 3) Funkcija atrod tuvāko LAS punktu 20 cm (0.2m) rādiusā
-    //    (Naiva implementācija, kas pārbauda visus punktus.)
-    // ==============================================================
-    function findNearestLASPoint(csvPt, maxDistance = 0.2) {
-      let nearestPoint = null;
+    // 3) Meklē tuvāko LAS punktu 20 cm rādiusā (naiva O(N) meklēšana)
+    function findNearestLASPoint(csvPt, maxDistance=0.2) {
+      let nearest = null;
       let minDist = Infinity;
 
-      for (const lasPt of lasPoints) {
-        const dx = lasPt.x - csvPt.x;
-        const dy = lasPt.y - csvPt.y;
+      for (const lp of lasPoints) {
+        const dx = lp.x - csvPt.x;
+        const dy = lp.y - csvPt.y;
         const dist2D = Math.sqrt(dx*dx + dy*dy);
         if (dist2D <= maxDistance && dist2D < minDist) {
           minDist = dist2D;
-          nearestPoint = lasPt;
+          nearest = lp;
         }
       }
-      return nearestPoint;
+      return nearest;
     }
 
-    // ==============================================================
-    // 4) Apstrādes poga
-    // ==============================================================
+    // 4) Kad lietotājs spiež "Sākt apstrādi"
     processBtn.addEventListener('click', async () => {
       if (!lasInput.files.length || !csvInput.files.length) {
         alert("Lūdzu, atlasiet gan LAS, gan CSV failu!");
         return;
       }
-
-      resultsDiv.innerHTML = "<p>Notiek apstrāde, lūdzu uzgaidiet...</p>";
+      resultsDiv.innerHTML = "<p>Notiek lasīšana un aprēķins, uzgaidiet...</p>";
 
       try {
-        // 1) Ielasam LAS
-        await parseLAS(lasInput.files[0]);
-        // 2) Ielasam CSV
-        await parseCSV(csvInput.files[0]);
+        // Ielasām LAS punktus
+        lasPoints = await parseLASwithPlasio(lasInput.files[0]);
         
-        // 3) Salīdzinām punktus
-        const tableRows = [];
-        tableRows.push("<tr><th>CSV X</th><th>CSV Y</th><th>CSV Z</th><th>LAS Z</th><th>ΔZ (CSV - LAS)</th><th>2D attālums</th></tr>");
+        // Ielasām CSV punktus
+        csvPoints = await parseCSV(csvInput.files[0]);
 
-        for (const cPt of csvPoints) {
-          const nearest = findNearestLASPoint(cPt, 0.2);
+        // Gatavojam HTML tabulu
+        const rows = [];
+        rows.push("<tr><th>CSV X</th><th>CSV Y</th><th>CSV Z</th><th>LAS Z</th><th>ΔZ</th><th>Attālums (2D)</th></tr>");
+
+        for (const cpt of csvPoints) {
+          const nearest = findNearestLASPoint(cpt, 0.2);  // 20cm
           if (nearest) {
-            const dz = cPt.z - nearest.z;
-            const dist2D = Math.sqrt(Math.pow(nearest.x - cPt.x, 2) + Math.pow(nearest.y - cPt.y, 2));
-            tableRows.push(
+            const dz = cpt.z - nearest.z;
+            const dist2D = Math.sqrt((nearest.x - cpt.x)**2 + (nearest.y - cpt.y)**2);
+            rows.push(
               `<tr>
-                 <td>${cPt.x.toFixed(3)}</td>
-                 <td>${cPt.y.toFixed(3)}</td>
-                 <td>${cPt.z.toFixed(3)}</td>
-                 <td>${nearest.z.toFixed(3)}</td>
-                 <td>${dz.toFixed(3)}</td>
-                 <td>${dist2D.toFixed(3)}</td>
-               </tr>`
+                <td>${cpt.x.toFixed(3)}</td>
+                <td>${cpt.y.toFixed(3)}</td>
+                <td>${cpt.z.toFixed(3)}</td>
+                <td>${nearest.z.toFixed(3)}</td>
+                <td>${dz.toFixed(3)}</td>
+                <td>${dist2D.toFixed(3)}</td>
+              </tr>`
             );
           } else {
-            tableRows.push(
+            // Ja nav tuvā punkta 20cm robežās
+            rows.push(
               `<tr>
-                 <td>${cPt.x.toFixed(3)}</td>
-                 <td>${cPt.y.toFixed(3)}</td>
-                 <td>${cPt.z.toFixed(3)}</td>
-                 <td>-</td>
-                 <td>-</td>
-                 <td>-</td>
-               </tr>`
+                <td>${cpt.x.toFixed(3)}</td>
+                <td>${cpt.y.toFixed(3)}</td>
+                <td>${cpt.z.toFixed(3)}</td>
+                <td>-</td>
+                <td>-</td>
+                <td>-</td>
+              </tr>`
             );
           }
         }
 
-        const tableHtml = `<table>${tableRows.join("\n")}</table>`;
-        resultsDiv.innerHTML = `<h3>Rezultāti</h3>${tableHtml}`;
+        resultsDiv.innerHTML = `
+          <h3>Rezultāti</h3>
+          <table>${rows.join("")}</table>
+        `;
 
       } catch (err) {
         console.error(err);
-        resultsDiv.innerHTML = `<p>Kļūda apstrādē: ${err.message}</p>`;
+        resultsDiv.innerHTML = `<p>Kļūda: ${err.message}</p>`;
       }
     });
   </script>
