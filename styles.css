@@ -19,10 +19,6 @@ h2 {
   margin-bottom: 30px;
 }
 
-.uploader, .input-group {
-  margin-bottom: 20px;
-}
-
 label {
   display: block;
   margin-bottom: 5px;
@@ -50,5 +46,5 @@ button:disabled {
 #output {
   margin-top: 20px;
   font-weight: bold;
-  color: green;
+  color: red; /* Izmaiņas, lai kļūdu ziņojumi būtu sarkani */
 }
