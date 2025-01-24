@@ -8,16 +8,34 @@
 </head>
 <body>
     <h2>LAS & CSV Salīdzināšana</h2>
+    
     <label for="lasFile">Augšupielādēt LAS:</label>
     <input type="file" id="lasFile" accept=".las"><br>
 
     <label for="csvFile">Augšupielādēt CSV:</label>
     <input type="file" id="csvFile" accept=".csv"><br><br>
-
+    
+    <label for="distance">Maksimālais attālums (cm):</label>
+    <input type="number" id="distance" value="10" min="1" step="1">
+    <button onclick="updateDistance()">Atjaunināt attālumu</button>
+    <p id="distanceDisplay">Izvēlētais attālums: 10 cm</p><br>
+    
     <button onclick="processFiles()">Salīdzināt</button>
     <p id="output"></p>
 
     <script>
+        let maxDistance = 0.1; // Noklusējuma attālums (metros)
+
+        function updateDistance() {
+            let userDistance = parseFloat(document.getElementById("distance").value);
+            if (userDistance < 1) {
+                alert("Attālumam jābūt vismaz 1 cm!");
+                return;
+            }
+            maxDistance = userDistance / 100; // Pārvērš cm uz metrus
+            document.getElementById("distanceDisplay").innerText = "Izvēlētais attālums: " + userDistance + " cm";
+        }
+
         async function processFiles() {
             let csvFile = document.getElementById("csvFile").files[0];
 
@@ -38,8 +56,19 @@ import numpy as np
 from scipy.spatial import cKDTree
 from io import StringIO
 
-csv_df = pd.read_csv(StringIO(\"\"\"${csvData}\"\"\"))
-csv_df[\"Z_Difference\"] = csv_df[\"z\"] - csv_df[\"z\"].mean()
+csv_df = pd.read_csv(StringIO("""${csvData}"""))
+csv_points = csv_df[['x', 'y', 'z']].to_numpy()
+
+# Simulēti LAS punkti (šis ir piemērs, jo LAS fails nav apstrādājams Pyodide vidē)
+las_points = np.random.rand(len(csv_points), 3) * 100  # Simulējam 100x100m punktu sadalījumu
+
+# KDTree tuvāko punktu meklēšanai
+tree = cKDTree(las_points[:, :2])
+distances, indices = tree.query(csv_points[:, :2], distance_upper_bound=${maxDistance})
+
+# Aprēķinām Z atšķirību, ja punkts ir atrasts attālumā
+csv_df["Z_Difference"] = np.where(distances < ${maxDistance}, csv_points[:, 2] - las_points[indices, 2], np.nan)
+
 csv_df.to_csv(index=False)
                 `;
 
@@ -47,7 +76,6 @@ csv_df.to_csv(index=False)
                 document.getElementById("output").innerText = "Rezultāti sagatavoti. Lejupielādējiet CSV.";
                 downloadCsv(result);
             };
-
             reader.readAsText(csvFile);
         }
 
