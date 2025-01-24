@@ -1,25 +1,3 @@
-<script>
-    function loadLAS() {
-        let lasFile = document.getElementById("lasFile").files[0];
-
-        if (!lasFile) {
-            console.log("Lūdzu, izvēlies LAS failu.");
-            return;
-        }
-
-        let reader = new FileReader();
-        reader.onload = function(event) {
-            let buffer = event.target.result;
-
-            try {
-                let pointCloud = Potree.loadPointCloud(buffer, "lasFile");
-                console.log("LAS faili veiksmīgi ielādēti:", pointCloud);
-                document.getElementById("output").innerText = "LAS fails veiksmīgi ielādēts!";
-            } catch (error) {
-                console.error("Kļūda ielādējot LAS failu:", error);
-            }
-        };
-
-        reader.readAsArrayBuffer(lasFile);
-    }
-</script>
+<head>
+    <script src="https://cdn.jsdelivr.net/gh/potree/potree@1.8.0/build/potree.min.js"></script>
+</head>
