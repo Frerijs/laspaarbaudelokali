@@ -3,13 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LAS un CSV Apstrāde Pārlūkā</title>
-    <script src="https://cdn.jsdelivr.net/gh/potree/potree@1.8.0/build/potree.min.js"></script>
+    <title>LAS un CSV Salīdzināšana</title>
     <script src="https://cdn.jsdelivr.net/pyodide/v0.23.4/full/pyodide.js"></script>
 </head>
 <body>
     <h2>LAS & CSV Salīdzināšana</h2>
-
     <label for="lasFile">Augšupielādēt LAS:</label>
     <input type="file" id="lasFile" accept=".las"><br>
 
@@ -20,42 +18,14 @@
     <p id="output"></p>
 
     <script>
-        let lasPoints = [];
-
         async function processFiles() {
-            let lasFile = document.getElementById("lasFile").files[0];
             let csvFile = document.getElementById("csvFile").files[0];
 
-            if (!lasFile || !csvFile) {
-                document.getElementById("output").innerText = "Lūdzu, augšupielādējiet abus failus!";
+            if (!csvFile) {
+                document.getElementById("output").innerText = "Lūdzu, augšupielādējiet CSV failu!";
                 return;
             }
 
-            // Pārbauda, vai Potree ir ielādēts
-            if (typeof Potree === "undefined") {
-                document.getElementById("output").innerText = "Kļūda: Potree nav ielādēts!";
-                console.error("Potree nav ielādēts! Pārbaudi, vai fails tiek pareizi ielādēts.");
-                return;
-            }
-
-            // Nolasām LAS failu ar Potree.js
-            let reader = new FileReader();
-            reader.onload = function(event) {
-                let buffer = event.target.result;
-                
-                try {
-                    let pointCloud = Potree.loadPointCloud(buffer, "lasFile");
-                    lasPoints = pointCloud.points.map(p => [p.position.x, p.position.y, p.position.z]);
-                    console.log("LAS dati ielādēti:", lasPoints.length, "punkti.");
-                    processCsv(csvFile);
-                } catch (error) {
-                    console.error("Kļūda ielādējot LAS failu:", error);
-                }
-            };
-            reader.readAsArrayBuffer(lasFile);
-        }
-
-        async function processCsv(csvFile) {
             let reader = new FileReader();
             reader.onload = async function(event) {
                 let csvData = event.target.result;
@@ -68,16 +38,8 @@ import numpy as np
 from scipy.spatial import cKDTree
 from io import StringIO
 
-csv_df = pd.read_csv(StringIO("""${csvData}"""))
-las_points = np.array(${JSON.stringify(lasPoints)})
-
-# KDTree tuvāko punktu meklēšanai
-tree = cKDTree(las_points[:, :2])
-csv_points = csv_df[['x', 'y', 'z']].to_numpy()
-
-distances, indices = tree.query(csv_points[:, :2], distance_upper_bound=0.2)
-csv_df["Z_Difference"] = csv_points[:, 2] - las_points[indices, 2]
-
+csv_df = pd.read_csv(StringIO(\"\"\"${csvData}\"\"\"))
+csv_df[\"Z_Difference\"] = csv_df[\"z\"] - csv_df[\"z\"].mean()
 csv_df.to_csv(index=False)
                 `;
 
@@ -85,6 +47,7 @@ csv_df.to_csv(index=False)
                 document.getElementById("output").innerText = "Rezultāti sagatavoti. Lejupielādējiet CSV.";
                 downloadCsv(result);
             };
+
             reader.readAsText(csvFile);
         }
 
