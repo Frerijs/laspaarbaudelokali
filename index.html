@@ -74,7 +74,7 @@ tree = cKDTree(las_points[:, :2])
 distances, indices = tree.query(csv_points[:, :2], distance_upper_bound=${maxDistance})
 
 # Pārbaudām, vai atrastie indeksi ir derīgi
-valid_mask = (distances < ${maxDistance}) & (indices < len(las_points))
+valid_mask = (distances < ${maxDistance}) & (indices >= 0) & (indices < len(las_points))
 
 # Ja indeksu nevar izmantot, iestatām NaN vērtības
 z_differences = np.full(len(csv_points), np.nan)
