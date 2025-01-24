@@ -2,7 +2,7 @@
 <html lang="lv">
 <head>
   <meta charset="UTF-8">
-  <title>LAS + CSV salīdzināšana ar k-d tree (kdbush)</title>
+  <title>LAS + CSV salīdzināšana (kdbush kā funkcija)</title>
   <style>
     body {
       font-family: sans-serif;
@@ -26,17 +26,17 @@
   </style>
 </head>
 <body>
-  <h1>LAS un CSV salīdzināšana (ar k-d tree, kdbush)</h1>
+  <h1>LAS un CSV salīdzināšana (ar kdbush funkciju)</h1>
   <p>
-    Ielādējiet <strong>LAS</strong> failu (EPSG:3059, Point Data Format 0..3) un
-    <strong>CSV</strong> failu (x,y,z). Tiks izveidots k-d tree, lai ātrāk meklētu tuvākos
-    LAS punktus 20&nbsp;cm attālumā.
+    Ielādējiet <strong>LAS</strong> failu (EPSG:3059, <em>Point Data Format</em> 0..3) un
+    <strong>CSV</strong> failu (x,y,z). Tiks izveidots kd-bush indekss, lai ātrāk meklētu
+    tuvākos LAS punktus 20&nbsp;cm rādiusā.
   </p>
 
-  <p><strong>LAS fails:</strong></p>
+  <p>LAS fails:</p>
   <input type="file" id="lasFile" accept=".las" />
 
-  <p><strong>CSV fails:</strong></p>
+  <p>CSV fails:</p>
   <input type="file" id="csvFile" accept=".csv,text/csv" />
 
   <br>
@@ -48,64 +48,79 @@
   <!-- Papa Parse CSV parsēšanai -->
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 
-  <!-- kdbush UMD fails (kdbush kļūst pieejams kā window.kdbush) -->
+  <!-- kdbush UMD fails: window.kdbush ir FUNKCIJA, nevis klase -->
   <script src="https://cdn.jsdelivr.net/npm/kdbush@3.0.0/kdbush.umd.js"></script>
 
   <script>
-    // ====== 1) Minimālais LAS parseris (atbalsta formātus 0..3, LAS 1.2/1.3) ======
+    const errorDiv = document.getElementById('error');
+    const resultsDiv = document.getElementById('results');
+    const lasFileInput = document.getElementById('lasFile');
+    const csvFileInput = document.getElementById('csvFile');
+    const processBtn = document.getElementById('processBtn');
+
+    // kdbush funkcija
+    const kdbushFn = window.kdbush;
+
+    let lasPoints = [];
+    let csvPoints = [];
+    let kdbIndex = null;
+
+    // =============================================
+    // 1) Vienkāršs LAS parseris (formāts 0..3)
+    // =============================================
     async function parseLAS(file) {
       const buffer = await file.arrayBuffer();
-      const dataView = new DataView(buffer);
+      const dv = new DataView(buffer);
 
-      // Pārbaudām "LASF" signatūru
+      // "LASF" signatūra
       const signature = String.fromCharCode(
-        dataView.getUint8(0),
-        dataView.getUint8(1),
-        dataView.getUint8(2),
-        dataView.getUint8(3)
+        dv.getUint8(0),
+        dv.getUint8(1),
+        dv.getUint8(2),
+        dv.getUint8(3)
       );
       if (signature !== "LASF") {
-        throw new Error("Failā netika atrasta 'LASF' signatūra. Vai tas tiešām ir .las fails?");
+        throw new Error("Failam trūkst 'LASF' signatūra. Vai tas ir .las fails?");
       }
 
-      // Nolasām galvenes laukus
-      const pointDataOffset = dataView.getUint32(96, true); // offset uz punktiem
-      const numPoints = dataView.getUint32(107, true);      // punkti
-      const scaleX = dataView.getFloat64(131, true);
-      const scaleY = dataView.getFloat64(139, true);
-      const scaleZ = dataView.getFloat64(147, true);
-      const offsetX = dataView.getFloat64(155, true);
-      const offsetY = dataView.getFloat64(163, true);
-      const offsetZ = dataView.getFloat64(171, true);
+      const pointDataOffset = dv.getUint32(96, true);
+      const numPoints = dv.getUint32(107, true);
 
-      const pointDataFormat = dataView.getUint8(104);
-      const pointRecordLen = dataView.getUint16(105, true);
+      const scaleX = dv.getFloat64(131, true);
+      const scaleY = dv.getFloat64(139, true);
+      const scaleZ = dv.getFloat64(147, true);
+      const offsetX = dv.getFloat64(155, true);
+      const offsetY = dv.getFloat64(163, true);
+      const offsetZ = dv.getFloat64(171, true);
 
-      // Atbalstām tikai formātus 0..3
+      const pointDataFormat = dv.getUint8(104);
+      const pointRecordLen = dv.getUint16(105, true);
+
       if (![0,1,2,3].includes(pointDataFormat)) {
         throw new Error("Neparedzēts Point Data Format: " + pointDataFormat);
       }
 
-      // Nolasām punktu datus
-      const pointsArray = [];
-      let offset = pointDataOffset;
+      const pointsArr = [];
+      let off = pointDataOffset;
       for (let i = 0; i < numPoints; i++) {
-        const Xint = dataView.getInt32(offset + 0, true);
-        const Yint = dataView.getInt32(offset + 4, true);
-        const Zint = dataView.getInt32(offset + 8, true);
+        const Xint = dv.getInt32(off + 0, true);
+        const Yint = dv.getInt32(off + 4, true);
+        const Zint = dv.getInt32(off + 8, true);
 
         const X = Xint * scaleX + offsetX;
         const Y = Yint * scaleY + offsetY;
         const Z = Zint * scaleZ + offsetZ;
 
-        pointsArray.push({x: X, y: Y, z: Z});
-        offset += pointRecordLen;
+        pointsArr.push({x: X, y: Y, z: Z});
+        off += pointRecordLen;
       }
 
-      return pointsArray;
+      return pointsArr;
     }
 
-    // ====== 2) CSV parsēšana ar Papa Parse ======
+    // =============================================
+    // 2) CSV parsēšana ar PapaParse -> {x,y,z}
+    // =============================================
     function parseCSV(file) {
       return new Promise((resolve, reject) => {
         Papa.parse(file, {
@@ -113,9 +128,8 @@
           skipEmptyLines: true,
           complete: (results) => {
             try {
-              const data = results.data;
-              // Katram rindas objektam meklē x,y,z (ign. reģistru)
-              const points = data.map(row => {
+              const arr = results.data;
+              const points = arr.map(row => {
                 const keys = {};
                 for (let k of Object.keys(row)) {
                   keys[k.toLowerCase()] = row[k];
@@ -124,7 +138,7 @@
                 const Y = parseFloat(keys['y']);
                 const Z = parseFloat(keys['z']);
                 return {x: X, y: Y, z: Z};
-              }).filter(pt => !isNaN(pt.x) && !isNaN(pt.y) && !isNaN(pt.z));
+              }).filter(p => !isNaN(p.x) && !isNaN(p.y) && !isNaN(p.z));
               resolve(points);
             } catch (err) {
               reject(err);
@@ -135,16 +149,11 @@
       });
     }
 
-    // ====== 3) kdbush – k-d tree jeb 2D meklēšanas struktūra ======
-    // UMD fails izveido window.kdbush
-    const KDBushClass = window.kdbush; // nav .default!
-
-    let lasPoints = [];
-    let csvPoints = [];
-    let kdbIndex = null;
-
-    function buildKDTree(points) {
-      return new KDBushClass(
+    // =============================================
+    // 3) Izveido k-d tree ar kdbush (funkciju)
+    // =============================================
+    function buildKDBushIndex(points) {
+      return kdbushFn(
         points,
         p => p.x, // x accessor
         p => p.y, // y accessor
@@ -153,40 +162,37 @@
       );
     }
 
-    // 4) Meklē tuvāko LAS punktu 20cm rādiusā, izmantojot range() + manuālu distance
+    // =============================================
+    // 4) Meklē tuvāko LAS punktu 20cm rādiusā
+    //    izmantojot index.range() + manuālu dist
+    // =============================================
     function findNearestLASPointKD(csvPt, radius = 0.2) {
       const minX = csvPt.x - radius;
       const minY = csvPt.y - radius;
       const maxX = csvPt.x + radius;
       const maxY = csvPt.y + radius;
 
-      // Atrodam kandidātu indeksus, kas ietilpst šajā taisnstūrī
       const candidateIndices = kdbIndex.range(minX, minY, maxX, maxY);
-
       let nearest = null;
       let minDist = Infinity;
+
       for (const idx of candidateIndices) {
         const lasPt = lasPoints[idx];
         const dx = lasPt.x - csvPt.x;
         const dy = lasPt.y - csvPt.y;
-        const dist2D = Math.sqrt(dx*dx + dy*dy);
-        if (dist2D < minDist && dist2D <= radius) {
-          minDist = dist2D;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        if (dist < minDist && dist <= radius) {
+          minDist = dist;
           nearest = lasPt;
         }
       }
       return nearest;
     }
 
-    // ====== 5) Galvenais process ======
-    const lasFileInput = document.getElementById('lasFile');
-    const csvFileInput = document.getElementById('csvFile');
-    const processBtn = document.getElementById('processBtn');
-    const errorDiv = document.getElementById('error');
-    const resultsDiv = document.getElementById('results');
-
+    // =============================================
+    // 5) Process poga
+    // =============================================
     processBtn.addEventListener('click', async () => {
-      // Notīrām iepriekšējos
       errorDiv.textContent = "";
       resultsDiv.innerHTML = "";
 
@@ -196,30 +202,27 @@
       }
 
       try {
-        resultsDiv.innerHTML = "Notiek ielāde un indeksa izveide, uzgaidiet...";
+        resultsDiv.innerHTML = "<p>Ielādē un sagatavo datus, lūdzu uzgaidiet...</p>";
 
-        // 1) Nolasa LAS failu → lasPoints
+        // 1) LasPoints
         lasPoints = await parseLAS(lasFileInput.files[0]);
 
-        // 2) Izveido k-d tree
-        kdbIndex = buildKDTree(lasPoints);
+        // 2) Izveido k-d index
+        kdbIndex = buildKDBushIndex(lasPoints);
 
-        // 3) Nolasa CSV failu → csvPoints
+        // 3) CSV punkti
         csvPoints = await parseCSV(csvFileInput.files[0]);
 
-        // 4) Katram CSV punktam meklē tuvāko LAS
-        const rows = [];
-        rows.push("<tr><th>CSV X</th><th>CSV Y</th><th>CSV Z</th><th>LAS Z</th><th>ΔZ (CSV-LAS)</th><th>2D attālums</th></tr>");
-
+        // 4) Meklē tuvāko
+        const tableRows = [];
+        tableRows.push("<tr><th>CSV X</th><th>CSV Y</th><th>CSV Z</th><th>LAS Z</th><th>ΔZ (CSV-LAS)</th><th>2D dist</th></tr>");
+        
         for (const cpt of csvPoints) {
           const nearest = findNearestLASPointKD(cpt, 0.2);
           if (nearest) {
             const dz = cpt.z - nearest.z;
-            const dist2D = Math.sqrt(
-              (nearest.x - cpt.x) ** 2 +
-              (nearest.y - cpt.y) ** 2
-            );
-            rows.push(`
+            const dist2D = Math.sqrt((nearest.x - cpt.x)**2 + (nearest.y - cpt.y)**2);
+            tableRows.push(`
               <tr>
                 <td>${cpt.x.toFixed(3)}</td>
                 <td>${cpt.y.toFixed(3)}</td>
@@ -230,7 +233,7 @@
               </tr>
             `);
           } else {
-            rows.push(`
+            tableRows.push(`
               <tr>
                 <td>${cpt.x.toFixed(3)}</td>
                 <td>${cpt.y.toFixed(3)}</td>
@@ -246,7 +249,7 @@
         resultsDiv.innerHTML = `
           <h3>Rezultāti</h3>
           <p>LAS punkti: ${lasPoints.length}, CSV punkti: ${csvPoints.length}</p>
-          <table>${rows.join("")}</table>
+          <table>${tableRows.join("")}</table>
         `;
       } catch (err) {
         console.error(err);
