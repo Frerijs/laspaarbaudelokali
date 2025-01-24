@@ -52,10 +52,18 @@
             let lasReader = new FileReader();
 
             csvReader.onload = async function(event) {
-                let csvData = event.target.result;
+                let csvData = event.target.result.trim();
+
+                if (!csvData) {
+                    document.getElementById("output").innerText = "CSV fails ir tukšs!";
+                    return;
+                }
 
                 lasReader.onload = async function(eventLas) {
                     let lasData = eventLas.result;
+                    
+                    // Šeit varētu būt LAS failu apstrāde, ja tā būtu iespējama
+                    // Pašlaik LAS punkti tiek simulēti
 
                     let pyodide = await loadPyodide();
                     await pyodide.loadPackage(["numpy", "pandas", "scipy"]);
@@ -66,43 +74,69 @@ import numpy as np
 from scipy.spatial import cKDTree
 from io import StringIO
 
-# Ielādē CSV datus
-csv_df = pd.read_csv(StringIO("""${csvData}"""))
-csv_points = csv_df[['x', 'y', 'z']].to_numpy()
+try:
+    # Ielādē CSV datus
+    csv_df = pd.read_csv(StringIO("""${csvData}"""))
+    if csv_df.empty:
+        raise ValueError("CSV fails nesatur datus.")
+    
+    if not {'x', 'y', 'z'}.issubset(csv_df.columns):
+        raise ValueError("CSV fails jāietver 'x', 'y' un 'z' kolonnas.")
 
-# Simulēti LAS punkti (aizvietojiet ar reālo LAS datu apstrādi)
-las_points = np.random.rand(len(csv_points), 3) * 100  # Simulējam 100x100m punktu sadalījumu
+    csv_points = csv_df[['x', 'y', 'z']].to_numpy()
 
-# Izveidojiet KDTree priekš LAS punktiem
-tree = cKDTree(las_points[:, :2])
-distances, indices = tree.query(csv_points[:, :2], distance_upper_bound=${maxDistance})
+    # Simulēti LAS punkti (aizvietojiet ar reālo LAS datu apstrādi)
+    las_points = np.random.rand(len(csv_points), 3) * 100  # Simulējam 100x100m punktu sadalījumu
 
-# Izveidojiet masku, kas nosaka derīgos indeksus
-mask = distances < ${maxDistance}
+    # Izveidojiet KDTree priekš LAS punktiem
+    tree = cKDTree(las_points[:, :2])
+    distances, indices = tree.query(csv_points[:, :2], distance_upper_bound=${maxDistance})
 
-# Inicializējiet Z_Difference ar NaN
-z_diff = np.full(len(csv_points), np.nan)
+    # Izveidojiet masku, kas nosaka derīgos indeksus
+    mask = distances < ${maxDistance}
 
-# Pārbaudiet, vai indeksi ir derīgi, lai izvairītos no IndexError
-valid_indices = indices < len(las_points)
+    if not np.any(mask):
+        raise ValueError("Nav atrasti LAS punkti noteiktajā attāluma robežās.")
 
-# Aplikējiet masku, lai atzīmētu tikai derīgos punktus
-final_mask = mask & valid_indices
+    # Inicializējiet Z_Difference ar NaN
+    z_diff = np.full(len(csv_points), np.nan)
 
-# Aprēķiniet Z_Difference tikai tiem punktiem, kas atrodas attāluma robežās
-z_diff[final_mask] = csv_points[final_mask, 2] - las_points[indices[final_mask], 2]
+    # Pārbaudiet, vai indeksi ir derīgi, lai izvairītos no IndexError
+    valid_indices = indices < len(las_points)
 
-# Pievienojiet rezultātu DataFrame
-csv_df["Z_Difference"] = z_diff
+    # Aplikējiet masku, lai atzīmētu tikai derīgos punktus
+    final_mask = mask & valid_indices
 
-# Konvertējiet rezultātu uz CSV
-result_csv = csv_df.to_csv(index=False)
-                    `;
+    if not np.any(final_mask):
+        raise ValueError("Nav derīgu LAS punktu salīdzināšanai ar CSV punktiem.")
+
+    # Aprēķiniet Z_Difference tikai tiem punktiem, kas atrodas attāluma robežās
+    z_diff[final_mask] = csv_points[final_mask, 2] - las_points[indices[final_mask], 2]
+
+    # Pievienojiet rezultātu DataFrame
+    csv_df["Z_Difference"] = z_diff
+
+    # Pārbaudiet, vai ir kaut kas salīdzināms
+    if csv_df["Z_Difference"].isnull().all():
+        raise ValueError("Nav salīdzināmu punktu. Nav atrasti LAS punkti noteiktajā attāluma robežās.")
+
+    # Konvertējiet rezultātu uz CSV
+    result_csv = csv_df.to_csv(index=False)
+except Exception as e:
+    result_csv = str(e)
+`;
 
                     try {
                         let result = await pyodide.runPythonAsync(code);
-                        document.getElementById("output").innerText = "Rezultāti sagatavoti. Lejupielādējiet CSV.";
-                        downloadCsv(result);
+                        
+                        // Pārbaudiet, vai rezultāts satur "Z_Difference" kolonnas
+                        if (result.includes("Z_Difference")) {
+                            document.getElementById("output").innerText = "Rezultāti sagatavoti. Lejupielādējiet CSV.";
+                            downloadCsv(result);
+                        } else {
+                            // Ja rezultāts nesatur "Z_Difference", tas ir kļūdas ziņojums
+                            document.getElementById("output").innerText = result;
+                        }
                     } catch (error) {
                         console.error(error);
                         document.getElementById("output").innerText = "Kļūda apstrādājot failus.";
