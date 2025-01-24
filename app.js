@@ -4,10 +4,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const processBtn = document.getElementById('processBtn');
   const downloadCSVBtn = document.getElementById('downloadCSVBtn');
   
-  let lasPoints = [];
-  let csvPoints = [];
   let resultPoints = [];
-  let lasTree = null;
   let map = null;
   
   // Inicializē Pyodide
@@ -20,26 +17,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await pyodide.loadPackage(['pandas', 'numpy', 'scipy', 'laspy']);
   console.log("Pyodide pakotnes ielādētas.");
   
-  // Krāsu klasifikācija
-  function classifyZDiff(z) {
-    if (z === null || z === undefined || isNaN(z)) {
-      return 'white'; // Nav atrasts
-    }
-    const absZ = Math.abs(z);
-    if (absZ <= 0.1) {
-      return 'green';
-    } else if (absZ <= 0.2) {
-      return 'orange';
-    } else if (absZ <= 0.5) {
-      return 'red';
-    } else if (absZ <= 1.0) {
-      return 'blue';
-    } else {
-      return 'purple';
-    }
-  }
-  
-  // Python skripts, kas parsē LAS failu un salīdzina ar CSV
+  // Python skripts, kas tiks izpildīts
   const pythonScript = `
 import pandas as pd
 import laspy
@@ -86,11 +64,30 @@ def process(las_bytes, csv_bytes, max_distance):
     
     # Pārvērš rezultātu DataFrame uz JSON
     return result_df.to_json(orient='records')
-`;
-
-  // Python funkcijas ielādēšana Pyodide
+  `;
+  
+  // Izpilda Python skriptu Pyodide
   await pyodide.runPythonAsync(pythonScript);
-  console.log("Python skripts ielādēts.");
+  console.log("Python skripts izpildīts.");
+  
+  // Krāsu klasifikācija
+  function classifyZDiff(z) {
+    if (z === null || z === undefined || isNaN(z)) {
+      return 'white'; // Nav atrasts
+    }
+    const absZ = Math.abs(z);
+    if (absZ <= 0.1) {
+      return 'green';
+    } else if (absZ <= 0.2) {
+      return 'orange';
+    } else if (absZ <= 0.5) {
+      return 'red';
+    } else if (absZ <= 1.0) {
+      return 'blue';
+    } else {
+      return 'purple';
+    }
+  }
   
   // Apstrāde
   async function processFiles() {
@@ -114,20 +111,29 @@ def process(las_bytes, csv_bytes, max_distance):
     const csvText = await csvFile.text();
     console.log("CSV faila dati ielādēti kā teksts.");
     
-    // Iegūt LAS faila bytes objekta
-    const lasBytes = pyodide.FS.writeFile('uploaded.las', new Uint8Array(lasArrayBuffer));
+    // Saglabāt LAS faila bytes objektā Pyodide FS
+    pyodide.FS.writeFile('uploaded.las', new Uint8Array(lasArrayBuffer));
+    console.log("LAS fails saglabāts Pyodide FS.");
     
-    // Izsaukt Python funkciju
+    // Saglabāt CSV faila saturu kā stringu Pyodide FS
+    pyodide.FS.writeFile('uploaded.csv', csvText);
+    console.log("CSV fails saglabāts Pyodide FS.");
+    
+    // Izsaukt Python funkciju 'process'
     try {
       const resultJson = pyodide.runPython(`
 import io
 from process import process
 
-las_bytes = io.BytesIO(bytearray(FS.readFile('uploaded.las')))
-csv_bytes = io.StringIO("""${csvText.replace(/"/g, '\\"')}""")
+with open('uploaded.las', 'rb') as f_las:
+    las_bytes = io.BytesIO(f_las.read())
+
+with open('uploaded.csv', 'r') as f_csv:
+    csv_bytes = io.StringIO(f_csv.read())
+
 result = process(las_bytes, csv_bytes, ${maxDistance})
 result
-`);
+      `);
       console.log("Python funkcija izpildīta.");
       
       // Parsēt rezultātu JSON
