@@ -1,64 +1,57 @@
 <!DOCTYPE html>
 <html lang="lv">
 <head>
-  <meta charset="UTF-8">
-  <title>LAS vs CSV Salīdzināšana</title>
-  <link rel="stylesheet" href="styles.css">
-  <!-- Leaflet CSS -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LAS & CSV Salīdzināšana</title>
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.23.4/full/pyodide.js"></script>
 </head>
 <body>
-  <div id="container">
-    <h1>LAS vs CSV Salīdzināšana</h1>
+    <h2>LAS & CSV Salīdzināšana</h2>
     
-    <!-- Failu Augšupielāde -->
-    <div class="uploader">
-      <label for="lasFile">Augšupielādē .las/.laz failu:</label>
-      <input type="file" id="lasFile" accept=".las,.laz">
-    </div>
-    
-    <div class="uploader">
-      <label for="csvFile">Augšupielādē .csv failu:</label>
-      <input type="file" id="csvFile" accept=".csv">
-    </div>
-    
-    <!-- Maksimālais Attālums -->
-    <div class="input-group">
-      <label for="maxDistance">Maksimālais attālums (m):</label>
-      <input type="number" id="maxDistance" value="0.2" step="0.1" min="0">
-    </div>
-    
-    <!-- Apstrādes Poga -->
-    <button id="processBtn">Salīdzināt</button>
-    
-    <!-- Rezultātu Sadaļa -->
-    <div id="results"></div>
-    
-    <!-- Kartes Vizualizācija -->
-    <div id="map"></div>
-    
-    <!-- Lejupielādes Poga -->
-    <div class="download-buttons">
-      <button id="downloadCSVBtn" disabled>Lejupielādēt Rezultātu CSV</button>
-    </div>
-  </div>
-  
-  <!-- Leaflet JS -->
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
-  
-  <!-- PapaParse -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-  
-  <!-- kdbush -->
-  <script src="https://unpkg.com/kdbush@3.0.0/kdbush.min.js"></script>
-  
-  <!-- FileSaver.js -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-  
-  <!-- Pyodide -->
-  <script src="https://cdn.jsdelivr.net/pyodide/v0.23.4/full/pyodide.js"></script>
-  
-  <!-- Galvenais JS fails -->
-  <script src="app.js"></script>
+    <label for="csvFile">Augšupielādēt CSV:</label>
+    <input type="file" id="csvFile" accept=".csv"><br><br>
+
+    <button onclick="processCsv()">Apstrādāt CSV</button>
+
+    <p id="output">Rezultāts tiks attēlots šeit...</p>
+
+    <script>
+        async function loadPyodideAndRun() {
+            let pyodide = await loadPyodide();
+            await pyodide.loadPackage(["numpy", "pandas"]);
+            return pyodide;
+        }
+
+        async function processCsv() {
+            let pyodide = await loadPyodideAndRun();
+            let csvFile = document.getElementById("csvFile").files[0];
+
+            if (!csvFile) {
+                document.getElementById("output").innerText = "Lūdzu, augšupielādējiet CSV failu!";
+                return;
+            }
+
+            let reader = new FileReader();
+            reader.onload = async function(event) {
+                let csvData = event.target.result;
+
+                let code = `
+import pandas as pd
+from io import StringIO
+
+csv_data = '''${csvData}'''
+df = pd.read_csv(StringIO(csv_data))
+df["Z_Offset"] = df["z"] - df["z"].mean()  # Piemērs: aprēķina Z vērtību nobīdi
+df.head().to_csv(index=False)
+                `;
+
+                let result = await pyodide.runPythonAsync(code);
+                document.getElementById("output").innerText = "Rezultāts:\n" + result;
+            };
+
+            reader.readAsText(csvFile);
+        }
+    </script>
 </body>
 </html>
