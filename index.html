@@ -26,14 +26,17 @@
   </style>
 </head>
 <body>
-  <h1>LAS un CSV salīdzināšana (ar k-d tree)</h1>
-  <p>Ielādējiet <strong>LAS</strong> failu (EPSG:3059, Point Data Format 0..3) un
-    <strong>CSV</strong> failu (x,y,z). Tiks izveidots k-d tree, lai ātrāk meklētu tuvākos LAS punktus 20&nbsp;cm attālumā.</p>
+  <h1>LAS un CSV salīdzināšana (ar k-d tree, kdbush)</h1>
+  <p>
+    Ielādējiet <strong>LAS</strong> failu (EPSG:3059, Point Data Format 0..3) un
+    <strong>CSV</strong> failu (x,y,z). Tiks izveidots k-d tree, lai ātrāk meklētu tuvākos
+    LAS punktus 20&nbsp;cm attālumā.
+  </p>
 
-  <p>LAS fails:</p>
+  <p><strong>LAS fails:</strong></p>
   <input type="file" id="lasFile" accept=".las" />
 
-  <p>CSV fails:</p>
+  <p><strong>CSV fails:</strong></p>
   <input type="file" id="csvFile" accept=".csv,text/csv" />
 
   <br>
@@ -45,32 +48,16 @@
   <!-- Papa Parse CSV parsēšanai -->
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 
-  <!-- kdbush UMD fails -->
+  <!-- kdbush UMD fails (kdbush kļūst pieejams kā window.kdbush) -->
   <script src="https://cdn.jsdelivr.net/npm/kdbush@3.0.0/kdbush.umd.js"></script>
 
   <script>
-    // Šeit "window.kdbush.default" ir faktiskā k-d tree konstruktora reference
-    // no kdbush.umd.js
-    const KDBushClass = window.kdbush.default;
-
-    const lasInput = document.getElementById('lasFile');
-    const csvInput = document.getElementById('csvFile');
-    const processBtn = document.getElementById('processBtn');
-    const errorDiv = document.getElementById('error');
-    const resultsDiv = document.getElementById('results');
-
-    let lasPoints = [];
-    let csvPoints = [];
-    let kdbIndex = null; // te glabāsim k-d tree (kdbush) indeksu
-
-    // ============================================================
-    // 1) Minimālais LAS parseris: atbalsta formātus 0..3, LAS 1.2/1.3
-    // ============================================================
+    // ====== 1) Minimālais LAS parseris (atbalsta formātus 0..3, LAS 1.2/1.3) ======
     async function parseLAS(file) {
       const buffer = await file.arrayBuffer();
       const dataView = new DataView(buffer);
 
-      // Pārbaude "LASF"
+      // Pārbaudām "LASF" signatūru
       const signature = String.fromCharCode(
         dataView.getUint8(0),
         dataView.getUint8(1),
@@ -81,25 +68,25 @@
         throw new Error("Failā netika atrasta 'LASF' signatūra. Vai tas tiešām ir .las fails?");
       }
 
-      // Galvenes lauki (pieņemot LAS 1.2/1.3)
-      const pointDataOffset = dataView.getUint32(96, true); // [96..99]
-      const numPoints = dataView.getUint32(107, true); // [107..110]
-      const scaleX = dataView.getFloat64(131, true); // [131..138]
-      const scaleY = dataView.getFloat64(139, true); // [139..146]
-      const scaleZ = dataView.getFloat64(147, true); // [147..154]
-      const offsetX = dataView.getFloat64(155, true); // [155..162]
-      const offsetY = dataView.getFloat64(163, true); // [163..170]
-      const offsetZ = dataView.getFloat64(171, true); // [171..178]
+      // Nolasām galvenes laukus
+      const pointDataOffset = dataView.getUint32(96, true); // offset uz punktiem
+      const numPoints = dataView.getUint32(107, true);      // punkti
+      const scaleX = dataView.getFloat64(131, true);
+      const scaleY = dataView.getFloat64(139, true);
+      const scaleZ = dataView.getFloat64(147, true);
+      const offsetX = dataView.getFloat64(155, true);
+      const offsetY = dataView.getFloat64(163, true);
+      const offsetZ = dataView.getFloat64(171, true);
 
-      const pointDataFormat = dataView.getUint8(104); // [104]
-      const pointRecordLen = dataView.getUint16(105, true); // [105..106]
+      const pointDataFormat = dataView.getUint8(104);
+      const pointRecordLen = dataView.getUint16(105, true);
 
-      // Atbalstām tikai 0..3
+      // Atbalstām tikai formātus 0..3
       if (![0,1,2,3].includes(pointDataFormat)) {
         throw new Error("Neparedzēts Point Data Format: " + pointDataFormat);
       }
 
-      // Nolasām punktus
+      // Nolasām punktu datus
       const pointsArray = [];
       let offset = pointDataOffset;
       for (let i = 0; i < numPoints; i++) {
@@ -118,9 +105,7 @@
       return pointsArray;
     }
 
-    // ============================================================
-    // 2) CSV lasīšana ar Papa Parse -> {x,y,z}
-    // ============================================================
+    // ====== 2) CSV parsēšana ar Papa Parse ======
     function parseCSV(file) {
       return new Promise((resolve, reject) => {
         Papa.parse(file, {
@@ -129,6 +114,7 @@
           complete: (results) => {
             try {
               const data = results.data;
+              // Katram rindas objektam meklē x,y,z (ign. reģistru)
               const points = data.map(row => {
                 const keys = {};
                 for (let k of Object.keys(row)) {
@@ -149,35 +135,36 @@
       });
     }
 
-    // ============================================================
-    // 3) Izveido k-d tree ar kdbush
-    // ============================================================
+    // ====== 3) kdbush – k-d tree jeb 2D meklēšanas struktūra ======
+    // UMD fails izveido window.kdbush
+    const KDBushClass = window.kdbush; // nav .default!
+
+    let lasPoints = [];
+    let csvPoints = [];
+    let kdbIndex = null;
+
     function buildKDTree(points) {
-      // KDBushClass ir window.kdbush.default, ko saglabājām augstāk
       return new KDBushClass(
         points,
         p => p.x, // x accessor
         p => p.y, // y accessor
-        64,       // nodeSize
+        64,
         Float32Array
       );
     }
 
-    // ============================================================
-    // 4) Meklē tuvāko LAS punktu 20cm rādiusā (2D) ar kdbush range()
-    // ============================================================
+    // 4) Meklē tuvāko LAS punktu 20cm rādiusā, izmantojot range() + manuālu distance
     function findNearestLASPointKD(csvPt, radius = 0.2) {
       const minX = csvPt.x - radius;
       const minY = csvPt.y - radius;
       const maxX = csvPt.x + radius;
       const maxY = csvPt.y + radius;
 
-      // Atrodam kandidātu indeksus (tie atbilst lasPoints masīva indeksiem)
+      // Atrodam kandidātu indeksus, kas ietilpst šajā taisnstūrī
       const candidateIndices = kdbIndex.range(minX, minY, maxX, maxY);
 
       let nearest = null;
       let minDist = Infinity;
-
       for (const idx of candidateIndices) {
         const lasPt = lasPoints[idx];
         const dx = lasPt.x - csvPt.x;
@@ -188,18 +175,22 @@
           nearest = lasPt;
         }
       }
-
       return nearest;
     }
 
-    // ============================================================
-    // 5) Pogas notikums
-    // ============================================================
+    // ====== 5) Galvenais process ======
+    const lasFileInput = document.getElementById('lasFile');
+    const csvFileInput = document.getElementById('csvFile');
+    const processBtn = document.getElementById('processBtn');
+    const errorDiv = document.getElementById('error');
+    const resultsDiv = document.getElementById('results');
+
     processBtn.addEventListener('click', async () => {
+      // Notīrām iepriekšējos
       errorDiv.textContent = "";
       resultsDiv.innerHTML = "";
 
-      if (!lasInput.files.length || !csvInput.files.length) {
+      if (!lasFileInput.files.length || !csvFileInput.files.length) {
         errorDiv.textContent = "Lūdzu, atlasiet gan LAS, gan CSV failu!";
         return;
       }
@@ -207,16 +198,16 @@
       try {
         resultsDiv.innerHTML = "Notiek ielāde un indeksa izveide, uzgaidiet...";
 
-        // 1) Nolasām LAS punktus
-        lasPoints = await parseLAS(lasInput.files[0]);
+        // 1) Nolasa LAS failu → lasPoints
+        lasPoints = await parseLAS(lasFileInput.files[0]);
 
-        // 2) Izveido k-d tree no LAS punktiem
+        // 2) Izveido k-d tree
         kdbIndex = buildKDTree(lasPoints);
 
-        // 3) Nolasām CSV
-        csvPoints = await parseCSV(csvInput.files[0]);
+        // 3) Nolasa CSV failu → csvPoints
+        csvPoints = await parseCSV(csvFileInput.files[0]);
 
-        // 4) Katram CSV punktam meklē tuvāko
+        // 4) Katram CSV punktam meklē tuvāko LAS
         const rows = [];
         rows.push("<tr><th>CSV X</th><th>CSV Y</th><th>CSV Z</th><th>LAS Z</th><th>ΔZ (CSV-LAS)</th><th>2D attālums</th></tr>");
 
@@ -225,8 +216,8 @@
           if (nearest) {
             const dz = cpt.z - nearest.z;
             const dist2D = Math.sqrt(
-              Math.pow(nearest.x - cpt.x, 2) +
-              Math.pow(nearest.y - cpt.y, 2)
+              (nearest.x - cpt.x) ** 2 +
+              (nearest.y - cpt.y) ** 2
             );
             rows.push(`
               <tr>
@@ -239,7 +230,6 @@
               </tr>
             `);
           } else {
-            // Ja nav neviena LAS punkta <= 20 cm
             rows.push(`
               <tr>
                 <td>${cpt.x.toFixed(3)}</td>
@@ -260,7 +250,7 @@
         `;
       } catch (err) {
         console.error(err);
-        errorDiv.textContent = err.message || err;
+        errorDiv.textContent = err.message;
       }
     });
   </script>
