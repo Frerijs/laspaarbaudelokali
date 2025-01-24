@@ -13,7 +13,8 @@
       width: 100%;
       margin-top: 1rem;
     }
-    #results th, #results td {
+    #results th,
+    #results td {
       border: 1px solid #ccc;
       padding: 6px 10px;
       text-align: left;
@@ -26,7 +27,8 @@
 </head>
 <body>
   <h1>LAS un CSV salīdzināšana (ar k-d tree)</h1>
-  <p>Ielādējiet <strong>LAS</strong> (EPSG:3059, Point Data Format 0..3, neliels piemērs) un <strong>CSV</strong> failu (x,y,z).</p>
+  <p>Ielādējiet <strong>LAS</strong> failu (EPSG:3059, Point Data Format 0..3) un
+    <strong>CSV</strong> failu (x,y,z). Tiks izveidots k-d tree, lai ātrāk meklētu tuvākos LAS punktus 20&nbsp;cm attālumā.</p>
 
   <p>LAS fails:</p>
   <input type="file" id="lasFile" accept=".las" />
@@ -43,13 +45,13 @@
   <!-- Papa Parse CSV parsēšanai -->
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 
-  <!-- kdbush UMD builds (kdbush.umd.js) -->
+  <!-- kdbush UMD fails -->
   <script src="https://cdn.jsdelivr.net/npm/kdbush@3.0.0/kdbush.umd.js"></script>
 
   <script>
-    // Lai varam lietot kdbush glabāto mainīgo
-    // (CDN ielādē to kā window.KDBush UMD).
-    const KDBush = window.KDBush;
+    // Šeit "window.kdbush.default" ir faktiskā k-d tree konstruktora reference
+    // no kdbush.umd.js
+    const KDBushClass = window.kdbush.default;
 
     const lasInput = document.getElementById('lasFile');
     const csvInput = document.getElementById('csvFile');
@@ -61,10 +63,9 @@
     let csvPoints = [];
     let kdbIndex = null; // te glabāsim k-d tree (kdbush) indeksu
 
-    // ----------------------------------------------------
-    // 1) Minimālais LAS parseris (kā iepriekšējā piemērā)
-    //    Atbalsta tikai "Point Data Format 0..3"
-    // ----------------------------------------------------
+    // ============================================================
+    // 1) Minimālais LAS parseris: atbalsta formātus 0..3, LAS 1.2/1.3
+    // ============================================================
     async function parseLAS(file) {
       const buffer = await file.arrayBuffer();
       const dataView = new DataView(buffer);
@@ -77,13 +78,10 @@
         dataView.getUint8(3)
       );
       if (signature !== "LASF") {
-        throw new Error("Failā netika atrasta 'LASF' signatūra.");
+        throw new Error("Failā netika atrasta 'LASF' signatūra. Vai tas tiešām ir .las fails?");
       }
 
-      // Galvenes lauki
-      const versionMajor = dataView.getUint8(24, true);
-      const versionMinor = dataView.getUint8(25, true);
-
+      // Galvenes lauki (pieņemot LAS 1.2/1.3)
       const pointDataOffset = dataView.getUint32(96, true); // [96..99]
       const numPoints = dataView.getUint32(107, true); // [107..110]
       const scaleX = dataView.getFloat64(131, true); // [131..138]
@@ -96,10 +94,12 @@
       const pointDataFormat = dataView.getUint8(104); // [104]
       const pointRecordLen = dataView.getUint16(105, true); // [105..106]
 
+      // Atbalstām tikai 0..3
       if (![0,1,2,3].includes(pointDataFormat)) {
         throw new Error("Neparedzēts Point Data Format: " + pointDataFormat);
       }
 
+      // Nolasām punktus
       const pointsArray = [];
       let offset = pointDataOffset;
       for (let i = 0; i < numPoints; i++) {
@@ -118,9 +118,9 @@
       return pointsArray;
     }
 
-    // ----------------------------------------------------
-    // 2) CSV lasīšana ar Papa Parse -> {x, y, z}
-    // ----------------------------------------------------
+    // ============================================================
+    // 2) CSV lasīšana ar Papa Parse -> {x,y,z}
+    // ============================================================
     function parseCSV(file) {
       return new Promise((resolve, reject) => {
         Papa.parse(file, {
@@ -149,54 +149,52 @@
       });
     }
 
-    // ----------------------------------------------------
-    // 3) Izveido k-d tree (kdbush)
-    // ----------------------------------------------------
+    // ============================================================
+    // 3) Izveido k-d tree ar kdbush
+    // ============================================================
     function buildKDTree(points) {
-      // kdbush gaida masīvu, un jānorāda, kā izvilkt x un y
-      // const index = new KDBush(points, getX, getY, nodeSize=64, ArrayType=Float32Array);
-      return new KDBush(
+      // KDBushClass ir window.kdbush.default, ko saglabājām augstāk
+      return new KDBushClass(
         points,
         p => p.x, // x accessor
         p => p.y, // y accessor
-        64,       // nodeSize (lielāka vērtība -> mazāks koka dziļums)
+        64,       // nodeSize
         Float32Array
       );
     }
 
-    // ----------------------------------------------------
-    // 4) Meklē tuvāko LAS punktu 20cm rādiusā, izmantojot k-d tree
-    //    - izmanto kdbush .range() lai atrastu kandidātus
-    //    - no kandidātiem izvēlas vistuvāko 2D attālumā
-    // ----------------------------------------------------
+    // ============================================================
+    // 4) Meklē tuvāko LAS punktu 20cm rādiusā (2D) ar kdbush range()
+    // ============================================================
     function findNearestLASPointKD(csvPt, radius = 0.2) {
-      // Taisnstūra meklēšana:
       const minX = csvPt.x - radius;
       const minY = csvPt.y - radius;
       const maxX = csvPt.x + radius;
       const maxY = csvPt.y + radius;
 
-      // range() atgriež to punktu indeksus, kas atrodas šajā X/Y robežā
+      // Atrodam kandidātu indeksus (tie atbilst lasPoints masīva indeksiem)
       const candidateIndices = kdbIndex.range(minX, minY, maxX, maxY);
 
       let nearest = null;
       let minDist = Infinity;
+
       for (const idx of candidateIndices) {
-        const lasPt = lasPoints[idx]; // jo index.range() atgriež masīva indexus
+        const lasPt = lasPoints[idx];
         const dx = lasPt.x - csvPt.x;
         const dy = lasPt.y - csvPt.y;
-        const dist = Math.sqrt(dx*dx + dy*dy);
-        if (dist < minDist && dist <= radius) {
-          minDist = dist;
+        const dist2D = Math.sqrt(dx*dx + dy*dy);
+        if (dist2D < minDist && dist2D <= radius) {
+          minDist = dist2D;
           nearest = lasPt;
         }
       }
+
       return nearest;
     }
 
-    // ----------------------------------------------------
+    // ============================================================
     // 5) Pogas notikums
-    // ----------------------------------------------------
+    // ============================================================
     processBtn.addEventListener('click', async () => {
       errorDiv.textContent = "";
       resultsDiv.innerHTML = "";
@@ -208,26 +206,28 @@
 
       try {
         resultsDiv.innerHTML = "Notiek ielāde un indeksa izveide, uzgaidiet...";
-        
-        // 1. Parse LAS
+
+        // 1) Nolasām LAS punktus
         lasPoints = await parseLAS(lasInput.files[0]);
 
-        // 2. Izveido k-d tree index
-        //    (Padomājiet par laiku un atmiņu, ja lasPoints ir ļoti liels.)
+        // 2) Izveido k-d tree no LAS punktiem
         kdbIndex = buildKDTree(lasPoints);
 
-        // 3. Parse CSV
+        // 3) Nolasām CSV
         csvPoints = await parseCSV(csvInput.files[0]);
 
-        // Tagad varam meklēt daudz ātrāk
+        // 4) Katram CSV punktam meklē tuvāko
         const rows = [];
-        rows.push("<tr><th>CSV X</th><th>CSV Y</th><th>CSV Z</th><th>LAS Z</th><th>ΔZ (CSV-LAS)</th><th>2D dist</th></tr>");
+        rows.push("<tr><th>CSV X</th><th>CSV Y</th><th>CSV Z</th><th>LAS Z</th><th>ΔZ (CSV-LAS)</th><th>2D attālums</th></tr>");
 
         for (const cpt of csvPoints) {
           const nearest = findNearestLASPointKD(cpt, 0.2);
           if (nearest) {
             const dz = cpt.z - nearest.z;
-            const dist2d = Math.sqrt((nearest.x - cpt.x)**2 + (nearest.y - cpt.y)**2);
+            const dist2D = Math.sqrt(
+              Math.pow(nearest.x - cpt.x, 2) +
+              Math.pow(nearest.y - cpt.y, 2)
+            );
             rows.push(`
               <tr>
                 <td>${cpt.x.toFixed(3)}</td>
@@ -235,10 +235,11 @@
                 <td>${cpt.z.toFixed(3)}</td>
                 <td>${nearest.z.toFixed(3)}</td>
                 <td>${dz.toFixed(3)}</td>
-                <td>${dist2d.toFixed(3)}</td>
+                <td>${dist2D.toFixed(3)}</td>
               </tr>
             `);
           } else {
+            // Ja nav neviena LAS punkta <= 20 cm
             rows.push(`
               <tr>
                 <td>${cpt.x.toFixed(3)}</td>
@@ -259,7 +260,7 @@
         `;
       } catch (err) {
         console.error(err);
-        errorDiv.textContent = err.message;
+        errorDiv.textContent = err.message || err;
       }
     });
   </script>
