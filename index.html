@@ -2,264 +2,34 @@
 <html lang="lv">
 <head>
   <meta charset="UTF-8">
-  <title>LAS + CSV salīdzināšana chunkos (EPSG:3059)</title>
+  <title>LAS + CSV apstrāde: Chunk + k-d tree + Web Workers</title>
   <style>
-    body {
-      font-family: sans-serif;
-      margin: 20px;
-    }
-    #results table {
-      border-collapse: collapse;
-      width: 100%;
-      margin-top: 1rem;
-    }
-    #results th, #results td {
-      border: 1px solid #ccc;
-      padding: 6px 10px;
-      text-align: left;
-    }
-    #error {
-      color: red;
-      font-weight: bold;
-    }
+    body { font-family: sans-serif; margin:20px; }
+    #results table { border-collapse: collapse; width:100%; margin-top:1rem; }
+    #results th, #results td { border:1px solid #ccc; padding:6px 10px; text-align:left; }
+    #error { color:red; font-weight:bold; }
   </style>
 </head>
 <body>
-  <h1>LAS + CSV salīdzināšana, lasot chunkus pārlūkā</h1>
-  <p>
-    Ielādējam <strong>galveni</strong> un tad punktus pa daļām, lai nav jāglabā viss faila saturs atmiņā.
-    Meklējam tuvāko &le;20cm katram CSV punktam (2D X-Y), lai noteiktu ΔZ.
-  </p>
+  <h1>LAS + CSV (EPSG:3059): Chunk + k-d tree + Web Workers</h1>
 
-  <p><strong>LAS fails</strong> (EPSG:3059):</p>
-  <input type="file" id="lasFile" accept=".las" />
-
-  <p><strong>CSV fails</strong> (EPSG:3059, kolonnas x,y,z):</p>
+  <p><strong>CSV fails (EPSG:3059):</strong> x,y,z (mazāks, lai var uzbūvēt k-d tree)</p>
   <input type="file" id="csvFile" accept=".csv,text/csv" />
 
-  <br/>
+  <p><strong>LAS fails (EPSG:3059):</strong> liels, chunk piegājienā apstrādāsim</p>
+  <input type="file" id="lasFile" accept=".las" />
+
+  <br>
   <button id="processBtn">Sākt apstrādi</button>
 
   <div id="error"></div>
+  <div id="status"></div>
   <div id="results"></div>
 
-  <!-- Papa Parse bibliotēka CSV parsēšanai -->
+  <!-- Papa Parse CSV bibliotēka -->
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 
-  <script>
-    const lasInput = document.getElementById("lasFile");
-    const csvInput = document.getElementById("csvFile");
-    const processBtn = document.getElementById("processBtn");
-    const errorDiv = document.getElementById("error");
-    const resultsDiv = document.getElementById("results");
-
-    let csvPoints = [];
-    let bestDist = []; // saglabāsim labāko attālumu CSV punktiem
-    let bestLASZ = []; // saglabāsim LAS Z (labākajam punktam)
-
-    // =======================================================
-    // 1) Nolasa CSV, konvertē uz {x,y,z}, sagatavo bestDist / bestLASZ
-    // =======================================================
-    function parseCSV(file) {
-      return new Promise((resolve, reject) => {
-        Papa.parse(file, {
-          header: true,
-          skipEmptyLines: true,
-          complete: (results) => {
-            try {
-              const data = results.data;
-              const points = data.map(row => {
-                const keys = {};
-                for (let k of Object.keys(row)) {
-                  keys[k.toLowerCase()] = row[k];
-                }
-                const X = parseFloat(keys['x']);
-                const Y = parseFloat(keys['y']);
-                const Z = parseFloat(keys['z']);
-                return {x: X, y: Y, z: Z};
-              }).filter(p => !isNaN(p.x) && !isNaN(p.y) && !isNaN(p.z));
-              resolve(points);
-            } catch (err) {
-              reject(err);
-            }
-          },
-          error: (err) => reject(err)
-        });
-      });
-    }
-
-    // =======================================================
-    // 2) Nolasa LAS galveni, lai uzzinātu offset, scale, u.c.
-    //    + atgriež numPoints, pointDataOffset, pointRecordLen, scale, offset
-    // =======================================================
-    async function readLASHeader(file) {
-      const headerSize = 375; // lasām "nedaudz vairāk" par minimālo, lai iekļautos
-      const blob = file.slice(0, headerSize);
-      const buffer = await blob.arrayBuffer();
-      const dv = new DataView(buffer);
-
-      // Pārbaudām "LASF"
-      const signature = String.fromCharCode(dv.getUint8(0), dv.getUint8(1), dv.getUint8(2), dv.getUint8(3));
-      if (signature !== "LASF") {
-        throw new Error("Trūkst 'LASF' signatūra. Vai tas ir LAS fails?");
-      }
-
-      const pointDataOffset = dv.getUint32(96, true);  // [96..99]
-      const numPoints = dv.getUint32(107, true);       // [107..110]
-      const scaleX = dv.getFloat64(131, true);
-      const scaleY = dv.getFloat64(139, true);
-      const scaleZ = dv.getFloat64(147, true);
-      const offsetX = dv.getFloat64(155, true);
-      const offsetY = dv.getFloat64(163, true);
-      const offsetZ = dv.getFloat64(171, true);
-
-      const pointDataFormat = dv.getUint8(104);
-      const pointRecordLen = dv.getUint16(105, true);
-
-      if (![0,1,2,3].includes(pointDataFormat)) {
-        throw new Error("Neparedzēts Point Data Format: " + pointDataFormat);
-      }
-
-      return {
-        numPoints,
-        pointDataOffset,
-        pointRecordLen,
-        scale: [scaleX, scaleY, scaleZ],
-        offset: [offsetX, offsetY, offsetZ]
-      };
-    }
-
-    // =======================================================
-    // 3) Funkcija, kas nolasa vienu "chunk" (n punkti) no faila, sākot no "byteOffset"
-    //    un salīdzina ar CSV punktiem. Neuzglabā chunk ilgāk par apstrādes laiku.
-    // =======================================================
-    async function processLASChunk(file, byteOffset, pointsToRead, recordLen, scale, offset) {
-      const chunkBytes = pointsToRead * recordLen;
-      const blob = file.slice(byteOffset, byteOffset + chunkBytes);
-      const buffer = await blob.arrayBuffer();
-      const dv = new DataView(buffer);
-
-      // Dekodējam katru punktu, meklējam, vai tuvāks CSV punktiem
-      let chunkOffset = 0;
-      for (let i = 0; i < pointsToRead; i++) {
-        const Xint = dv.getInt32(chunkOffset + 0, true);
-        const Yint = dv.getInt32(chunkOffset + 4, true);
-        const Zint = dv.getInt32(chunkOffset + 8, true);
-
-        const X = Xint * scale[0] + offset[0];
-        const Y = Yint * scale[1] + offset[1];
-        const Z = Zint * scale[2] + offset[2];
-
-        chunkOffset += recordLen;
-
-        // Tālāk – naiva meklēšana CSV punktos (O(M)).
-        // Ja CSV ir liels, tas būs lēns.
-        // Jaunākajās versijās varbūt lietot k-d tree CSV pusē?
-        for (let c = 0; c < csvPoints.length; c++) {
-          // Pārbaudām, vai varbūt šis LAS punkts ir tuvāks
-          const dx = csvPoints[c].x - X;
-          const dy = csvPoints[c].y - Y;
-          const dist2D = Math.sqrt(dx*dx + dy*dy);
-          if (dist2D <= 0.2 && dist2D < bestDist[c]) {
-            bestDist[c] = dist2D;
-            bestLASZ[c] = Z;
-          }
-        }
-      }
-    }
-
-    // =======================================================
-    // 4) Kopējais process
-    // =======================================================
-    processBtn.addEventListener("click", async () => {
-      errorDiv.textContent = "";
-      resultsDiv.innerHTML = "";
-
-      if (!lasInput.files.length || !csvInput.files.length) {
-        errorDiv.textContent = "Lūdzu, izvēlieties gan LAS, gan CSV failu!";
-        return;
-      }
-
-      try {
-        resultsDiv.innerHTML = "Lasa CSV...";
-        // 1) Ielādējam CSV
-        csvPoints = await parseCSV(csvInput.files[0]);
-        // Iniciējam "labākos" attālumus ar Infinity
-        bestDist = new Array(csvPoints.length).fill(Infinity);
-        bestLASZ = new Array(csvPoints.length).fill(null);
-
-        // 2) Nolasa LAS galvenes informāciju
-        resultsDiv.innerHTML = "Lasa LAS galveni...";
-        const {numPoints, pointDataOffset, pointRecordLen, scale, offset} = await readLASHeader(lasInput.files[0]);
-        
-        // 3) Chunk iestatījumi
-        const CHUNK_SIZE = 5000000; // cik punktus lasām vienā chunk
-        const totalPoints = numPoints;
-        let pointsRemaining = totalPoints;
-
-        let currentByteOffset = pointDataOffset;
-        const file = lasInput.files[0];
-
-        // 4) Iterējam chunkus
-        let chunkIndex = 0;
-
-        while (pointsRemaining > 0) {
-          chunkIndex++;
-          const pointsToRead = Math.min(CHUNK_SIZE, pointsRemaining);
-          resultsDiv.innerHTML = `
-            <p>Apstrādā chunk #${chunkIndex}, punktu: ${totalPoints - pointsRemaining + 1} - ${totalPoints - pointsRemaining + pointsToRead}
-               (no ${totalPoints})...</p>
-          `;
-          // Apstrādā chunk
-          await processLASChunk(file, currentByteOffset, pointsToRead, pointRecordLen, scale, offset);
-
-          // Atjaunina offset, samazina remaining
-          currentByteOffset += pointsToRead * pointRecordLen;
-          pointsRemaining -= pointsToRead;
-        }
-
-        // 5) Kad viss done, ģenerējam rezultātu
-        resultsDiv.innerHTML = "<h3>Rezultāti</h3>";
-        let html = `<table>
-          <tr><th>CSV X</th><th>CSV Y</th><th>CSV Z</th><th>LAS Z</th><th>ΔZ (CSV-LAS)</th><th>2D attālums</th></tr>
-        `;
-
-        for (let i = 0; i < csvPoints.length; i++) {
-          const dist = bestDist[i];
-          if (dist < Infinity) {
-            const dz = csvPoints[i].z - bestLASZ[i];
-            html += `
-              <tr>
-                <td>${csvPoints[i].x.toFixed(3)}</td>
-                <td>${csvPoints[i].y.toFixed(3)}</td>
-                <td>${csvPoints[i].z.toFixed(3)}</td>
-                <td>${bestLASZ[i].toFixed(3)}</td>
-                <td>${dz.toFixed(3)}</td>
-                <td>${dist.toFixed(3)}</td>
-              </tr>
-            `;
-          } else {
-            // Nav neviena LAS punkta <=20cm
-            html += `
-              <tr>
-                <td>${csvPoints[i].x.toFixed(3)}</td>
-                <td>${csvPoints[i].y.toFixed(3)}</td>
-                <td>${csvPoints[i].z.toFixed(3)}</td>
-                <td>-</td>
-                <td>-</td>
-                <td>-</td>
-              </tr>
-            `;
-          }
-        }
-        html += "</table>";
-        resultsDiv.innerHTML += html;
-
-      } catch (err) {
-        console.error(err);
-        errorDiv.textContent = "Kļūda: " + err.message;
-      }
-    });
-  </script>
+  <!-- Galvenais skripts -->
+  <script src="./main.js"></script>
 </body>
 </html>
