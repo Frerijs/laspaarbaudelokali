@@ -2,7 +2,7 @@
 <html lang="lv">
 <head>
   <meta charset="UTF-8">
-  <title>LAS + CSV apstrāde: Chunk + k-d tree + Web Workers</title>
+  <title>LAS + CSV: Paralēla apstrāde ar vairākiem Web Workers</title>
   <style>
     body { font-family: sans-serif; margin:20px; }
     #results table { border-collapse: collapse; width:100%; margin-top:1rem; }
@@ -11,12 +11,11 @@
   </style>
 </head>
 <body>
-  <h1>LAS + CSV (EPSG:3059): Chunk + k-d tree + Web Workers</h1>
-
-  <p><strong>CSV fails (EPSG:3059):</strong> x,y,z (mazāks, lai var uzbūvēt k-d tree)</p>
+  <h1>LAS un CSV salīdzināšana: Paralēli Web Workers + chunk + k-d tree</h1>
+  <p><strong>CSV fails (EPSG:3059, x,y,z):</strong></p>
   <input type="file" id="csvFile" accept=".csv,text/csv" />
 
-  <p><strong>LAS fails (EPSG:3059):</strong> liels, chunk piegājienā apstrādāsim</p>
+  <p><strong>LAS fails (EPSG:3059):</strong></p>
   <input type="file" id="lasFile" accept=".las" />
 
   <br>
@@ -28,7 +27,6 @@
 
   <!-- Papa Parse CSV bibliotēka -->
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-
   <!-- Galvenais skripts -->
   <script src="./main.js"></script>
 </body>
