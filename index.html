@@ -60,26 +60,14 @@
                 let lasData = await window.loaders.parse(lasArrayBuffer, window.loaders.LASLoader, {});
 
                 console.log("LAS Data:", lasData);
+                let attributes = Object.keys(lasData.attributes);
+                console.log("Pieejamie LAS atribūti:", attributes);
 
-                if (lasData && lasData.attributes) {
-                    let x_attr = "X";
-                    let y_attr = "Y";
-                    let z_attr = "Z";
-
-                    if (lasData.attributes[x_attr] && lasData.attributes[y_attr] && lasData.attributes[z_attr]) {
-                        lasPoints = lasData.attributes[x_attr].value.map((_, i) => [
-                            lasData.attributes[x_attr].value[i],
-                            lasData.attributes[y_attr].value[i],
-                            lasData.attributes[z_attr].value[i]
-                        ]);
-                    } else {
-                        console.error("Kļūda: LAS failā nav atrasti X, Y, Z dati!");
-                        document.getElementById("output").innerText = "Kļūda: LAS failā nav atrasti X, Y, Z dati!";
-                        return;
-                    }
+                if (lasData.attributes["POSITION"]) {
+                    lasPoints = lasData.attributes["POSITION"].value;
                 } else {
-                    console.error("Kļūda: LAS dati nav korekti!");
-                    document.getElementById("output").innerText = "Kļūda: LAS dati nav korekti!";
+                    console.error("Kļūda: LAS failā nav atrasti X, Y, Z dati!");
+                    document.getElementById("output").innerText = "Kļūda: LAS failā nav atrasti X, Y, Z dati!";
                     return;
                 }
 
