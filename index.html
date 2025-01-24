@@ -65,15 +65,24 @@
 
                 console.log("LAS Data:", lasData); // Pārbaudām, kas ir iegūtajos datos
 
-                // 🔹 Pārbaudām, vai dati satur koordinātas
+                // 🔹 Meklējam iespējamos X, Y, Z atribūtus
                 if (lasData && lasData.attributes) {
-                    if (lasData.attributes.position) {
-                        lasPoints = lasData.attributes.position.value;
-                    } else if (lasData.attributes.POSITION) { // Alternatīva pārbaude
-                        lasPoints = lasData.attributes.POSITION.value;
+                    let possibleAttributes = Object.keys(lasData.attributes);
+                    console.log("Pieejamie LAS atribūti:", possibleAttributes);
+
+                    let x_attr = possibleAttributes.find(attr => attr.toLowerCase().includes("x"));
+                    let y_attr = possibleAttributes.find(attr => attr.toLowerCase().includes("y"));
+                    let z_attr = possibleAttributes.find(attr => attr.toLowerCase().includes("z"));
+
+                    if (x_attr && y_attr && z_attr) {
+                        lasPoints = lasData.attributes[x_attr].value.map((_, i) => [
+                            lasData.attributes[x_attr].value[i],
+                            lasData.attributes[y_attr].value[i],
+                            lasData.attributes[z_attr].value[i]
+                        ]);
                     } else {
-                        console.error("Kļūda: LAS failā nav atrastas koordinātas!");
-                        document.getElementById("output").innerText = "Kļūda: LAS failā nav atrastas koordinātas!";
+                        console.error("Kļūda: LAS failā nav atrasti X, Y, Z dati!");
+                        document.getElementById("output").innerText = "Kļūda: LAS failā nav atrasti X, Y, Z dati!";
                         return;
                     }
                 } else {
@@ -103,7 +112,7 @@ if not required_columns.issubset(csv_df.columns):
     raise ValueError(f"Trūkst šādas kolonnas: {required_columns - set(csv_df.columns)}")
 
 csv_points = csv_df[['x', 'y', 'z']].to_numpy()
-las_points = np.array(globalThis.lasPoints).reshape(-1, 3)
+las_points = np.array(globalThis.lasPoints)
 
 tree = cKDTree(las_points[:, :2])
 distances, indices = tree.query(csv_points[:, :2], distance_upper_bound=${maxDistance})
