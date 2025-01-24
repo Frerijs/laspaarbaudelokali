@@ -5,26 +5,33 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LAS un CSV Salīdzināšana</title>
     <script src="https://cdn.jsdelivr.net/pyodide/v0.23.4/full/pyodide.js"></script>
+    <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <h2>LAS & CSV Salīdzināšana</h2>
-    
-    <label for="lasFile">Augšupielādēt LAS:</label>
-    <input type="file" id="lasFile" accept=".las"><br>
-
-    <label for="csvFile">Augšupielādēt CSV:</label>
-    <input type="file" id="csvFile" accept=".csv"><br><br>
-    
-    <label for="distance">Maksimālais attālums (cm):</label>
-    <input type="number" id="distance" value="10" min="1" step="1">
-    <button onclick="updateDistance()">Atjaunināt attālumu</button>
-    <p id="distanceDisplay">Izvēlētais attālums: 10 cm</p><br>
-    
-    <button onclick="processFiles()">Salīdzināt</button>
-    <p id="output"></p>
+    <div id="container">
+        <h2>LAS & CSV Salīdzināšana</h2>
+        
+        <div class="uploader">
+            <label for="lasFile">Augšupielādēt LAS:</label>
+            <input type="file" id="lasFile" accept=".las"><br>
+        
+            <label for="csvFile">Augšupielādēt CSV:</label>
+            <input type="file" id="csvFile" accept=".csv"><br>
+        </div>
+        
+        <div class="input-group">
+            <label for="distance">Maksimālais attālums (cm):</label>
+            <input type="number" id="distance" value="10" min="1" step="1">
+            <button onclick="updateDistance()">Atjaunināt attālumu</button>
+            <p id="distanceDisplay">Izvēlētais attālums: 10 cm</p>
+        </div>
+        
+        <button onclick="processFiles()">Salīdzināt</button>
+        <p id="output"></p>
+    </div>
 
     <script>
-        let maxDistance = 0.1; // Noklusējuma attālums (metros)
+        let maxDistance = 0.1; // Default distance in meters
 
         function updateDistance() {
             let userDistance = parseFloat(document.getElementById("distance").value);
@@ -32,51 +39,80 @@
                 alert("Attālumam jābūt vismaz 1 cm!");
                 return;
             }
-            maxDistance = userDistance / 100; // Pārvērš cm uz metrus
+            maxDistance = userDistance / 100; // Convert cm to meters
             document.getElementById("distanceDisplay").innerText = "Izvēlētais attālums: " + userDistance + " cm";
         }
 
         async function processFiles() {
             let csvFile = document.getElementById("csvFile").files[0];
+            let lasFile = document.getElementById("lasFile").files[0];
 
-            if (!csvFile) {
-                document.getElementById("output").innerText = "Lūdzu, augšupielādējiet CSV failu!";
+            if (!csvFile || !lasFile) {
+                document.getElementById("output").innerText = "Lūdzu, augšupielādējiet gan CSV, gan LAS failus!";
                 return;
             }
 
-            let reader = new FileReader();
-            reader.onload = async function(event) {
-                let csvData = event.target.result;
-                let pyodide = await loadPyodide();
-                await pyodide.loadPackage(["numpy", "pandas", "scipy"]);
+            let csvReader = new FileReader();
+            let lasReader = new FileReader();
 
-                let code = `
+            // Read CSV File
+            csvReader.onload = async function(event) {
+                let csvData = event.target.result;
+
+                // Read LAS File
+                lasReader.onload = async function(eventLas) {
+                    let lasData = eventLas.result;
+
+                    // Initialize Pyodide
+                    let pyodide = await loadPyodide();
+                    await pyodide.loadPackage(["numpy", "pandas", "scipy"]);
+
+                    // Pass CSV and LAS data to Python
+                    // Note: Pyodide cannot directly parse LAS files. You need to convert LAS to a readable format (e.g., CSV or JSON) beforehand.
+                    // Alternatively, use a JavaScript library to parse LAS files and pass the data to Python.
+
+                    // For demonstration, we'll simulate LAS points as before.
+                    let code = `
 import pandas as pd
 import numpy as np
 from scipy.spatial import cKDTree
 from io import StringIO
 
+# Load CSV data
 csv_df = pd.read_csv(StringIO("""${csvData}"""))
 csv_points = csv_df[['x', 'y', 'z']].to_numpy()
 
-# Simulēti LAS punkti (šis ir piemērs, jo LAS fails nav apstrādājams Pyodide vidē)
-las_points = np.random.rand(len(csv_points), 3) * 100  # Simulējam 100x100m punktu sadalījumu
+# Simulated LAS points (replace this with actual LAS data processing)
+las_points = np.random.rand(len(csv_points), 3) * 100  # Simulated 100x100m point distribution
 
-# KDTree tuvāko punktu meklēšanai
+# Build KDTree for LAS points
 tree = cKDTree(las_points[:, :2])
 distances, indices = tree.query(csv_points[:, :2], distance_upper_bound=${maxDistance})
 
-# Aprēķinām Z atšķirību, ja punkts ir atrasts attālumā
+# Calculate Z difference if within the specified distance
 csv_df["Z_Difference"] = np.where(distances < ${maxDistance}, csv_points[:, 2] - las_points[indices, 2], np.nan)
 
-csv_df.to_csv(index=False)
-                `;
+# Convert the result to CSV
+result_csv = csv_df.to_csv(index=False)
+                    `;
 
-                let result = await pyodide.runPythonAsync(code);
-                document.getElementById("output").innerText = "Rezultāti sagatavoti. Lejupielādējiet CSV.";
-                downloadCsv(result);
+                    try {
+                        let result = await pyodide.runPythonAsync(code);
+                        document.getElementById("output").innerText = "Rezultāti sagatavoti. Lejupielādējiet CSV.";
+                        downloadCsv(result);
+                    } catch (error) {
+                        console.error(error);
+                        document.getElementById("output").innerText = "Kļūda apstrādājot failus.";
+                    }
+                };
+
+                // Read LAS file as ArrayBuffer or appropriate format
+                // Here we read it as text for simplicity, but LAS is a binary format
+                // You need to parse it correctly using a LAS parser
+                lasReader.readAsArrayBuffer(lasFile);
             };
-            reader.readAsText(csvFile);
+
+            csvReader.readAsText(csvFile);
         }
 
         function downloadCsv(csvContent) {
