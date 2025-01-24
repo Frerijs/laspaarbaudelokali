@@ -4,7 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LAS un CSV Salīdzināšana</title>
+    <!-- Pyodide -->
     <script src="https://cdn.jsdelivr.net/pyodide/v0.23.4/full/pyodide.js"></script>
+    <!-- loaders.gl (core + LAS) -->
     <script src="https://unpkg.com/@loaders.gl/core@3.2.0/dist/dist.min.js"></script>
     <script src="https://unpkg.com/@loaders.gl/las@3.2.0/dist/dist.min.js"></script>
 </head>
@@ -26,7 +28,8 @@
     <p id="output"></p>
 
     <script>
-        let maxDistance = 0.1;
+        // Šeit lietosim metrus iekšējai aprēķinu loģikai, tādēļ 1 cm = 0.01 m
+        let maxDistance = 0.1;  // default 0.1 m = 10 cm
         let lasPoints = [];
 
         function updateDistance() {
@@ -35,6 +38,7 @@
                 alert("Attālumam jābūt vismaz 1 cm!");
                 return;
             }
+            // saglabājam metros
             maxDistance = userDistance / 100;
             document.getElementById("distanceDisplay").innerText = "Izvēlētais attālums: " + userDistance + " cm";
         }
@@ -48,7 +52,8 @@
                 return;
             }
 
-            if (!window.loaders || !window.loaders.LASLoader || !window.loaders.parse) {
+            // Pārliecināmies, ka loaders.gl UMD bundļi ir veiksmīgi ielādējušies
+            if (!window.loaders || !window.loadersLAS) {
                 console.error("loaders.gl nav pareizi ielādēts!");
                 document.getElementById("output").innerText = "Kļūda: loaders.gl nav ielādēts!";
                 return;
@@ -57,26 +62,43 @@
             let lasReader = new FileReader();
             lasReader.onload = async function(event) {
                 let lasArrayBuffer = event.target.result;
-                let lasData = await window.loaders.parse(lasArrayBuffer, window.loaders.LASLoader, {});
+
+                // Izmantojam parse no window.loaders un LASLoader no window.loadersLAS
+                let lasData;
+                try {
+                    lasData = await window.loaders.parse(
+                        lasArrayBuffer, 
+                        window.loadersLAS.LASLoader,
+                        {} // Papildu opcijas, ja vajag
+                    );
+                } catch (e) {
+                    console.error("Kļūda parsējot LAS:", e);
+                    document.getElementById("output").innerText = "Kļūda: Nevar nolasīt LAS failu!";
+                    return;
+                }
 
                 console.log("LAS Data:", lasData);
-                let attributes = Object.keys(lasData.attributes);
-                console.log("Pieejamie LAS atribūti:", attributes);
-
-                if (lasData.attributes["POSITION"]) {
-                    lasPoints = lasData.attributes["POSITION"].value;
-                } else {
+                // Pārbaudām, vai mums ir pieejams POSITION masīvs
+                if (!lasData?.attributes?.POSITION?.value) {
                     console.error("Kļūda: LAS failā nav atrasti X, Y, Z dati!");
                     document.getElementById("output").innerText = "Kļūda: LAS failā nav atrasti X, Y, Z dati!";
                     return;
                 }
 
+                // Tas ir Float32Array [x1, y1, z1, x2, y2, z2, ...]
+                let positionsArray = lasData.attributes.POSITION.value;
+                // Saglabāsim vienkārši globālajā masīvā; Python pusē reshape-osim
+                lasPoints = Array.from(positionsArray);
+
+                // Tagad ķeramies klāt CSV apstrādei
                 let csvReader = new FileReader();
                 csvReader.onload = async function(event) {
                     let csvData = event.target.result;
+
                     let pyodide = await loadPyodide();
                     await pyodide.loadPackage(["numpy", "pandas", "scipy"]);
 
+                    // Ieliekam JavaScript masīvu Pyodide iekšējā vidē
                     pyodide.globals.set("las_points", lasPoints);
 
                     let code = `
@@ -85,6 +107,7 @@ import numpy as np
 from scipy.spatial import cKDTree
 from io import StringIO
 
+# CSV izejas dati
 csv_df = pd.read_csv(StringIO("""${csvData}"""))
 csv_df.columns = csv_df.columns.str.upper().str.strip()
 
@@ -93,11 +116,16 @@ if not required_columns.issubset(csv_df.columns):
     raise ValueError(f"Trūkst šādas kolonnas: {required_columns - set(csv_df.columns)}")
 
 csv_points = csv_df[['X', 'Y', 'Z']].to_numpy()
-las_points = np.array(pyodide.globals.get("las_points"))
 
+# --- LAS punkti no JS masīva; jāreshape, lai būtu Nx3 ---
+_js_las_points = pyodide.globals.get("las_points")
+las_points = np.array(_js_las_points, dtype=np.float64).reshape(-1, 3)
+
+# Izveidojam KD koku uz X,Y
 tree = cKDTree(las_points[:, :2])
 distances, indices = tree.query(csv_points[:, :2], distance_upper_bound=${maxDistance})
 
+# Pārbaudām, kuri punkti ir derīgi
 valid_mask = (distances < ${maxDistance}) & (indices >= 0) & (indices < len(las_points))
 
 z_differences = np.full(len(csv_points), np.nan)
@@ -105,6 +133,7 @@ z_differences[valid_mask] = csv_points[valid_mask, 2] - las_points[indices[valid
 
 csv_df["Z_Difference"] = z_differences
 
+# Ja visi Z_Difference ir NaN, nozīmē nevienu punktu neatradām
 if np.all(np.isnan(csv_df["Z_Difference"])):
     result_csv = "Nav atrasti tuvākie LAS punkti noteiktajā attālumā."
 else:
