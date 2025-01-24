@@ -2,7 +2,7 @@
 <html lang="lv">
 <head>
   <meta charset="UTF-8">
-  <title>LAS un CSV salīdzināšana, izmantojot loaders.gl</title>
+  <title>Vienkārša LAS un CSV salīdzināšana (EPSG:3059)</title>
   <style>
     body {
       font-family: sans-serif;
@@ -18,69 +18,147 @@
       padding: 6px 10px;
       text-align: left;
     }
+    #error {
+      color: red;
+      font-weight: bold;
+    }
   </style>
 </head>
 <body>
-  <h1>LAS un CSV salīdzināšana (EPSG:3059) ar loaders.gl</h1>
+  <h1>LAS un CSV salīdzināšana (EPSG:3059)</h1>
 
-  <p>1) Ielādējiet LAS/LAZ failu (EPSG:3059)</p>
-  <input type="file" id="lasFile" accept=".las,.laz" />
+  <p>
+    Šī demonstrācija parāda, kā var nolasīt LAS failu (tikai X/Y/Z) pārlūkā “ar rokām”
+    un salīdzināt ar CSV punktiem 20&nbsp;cm robežās.
+  </p>
 
-  <p>2) Ielādējiet CSV failu (EPSG:3059, kolonnas x,y,z vai X,Y,Z)</p>
+  <p>1) Ielādējiet <strong>LAS failu</strong> (EPSG:3059, <em>Point Data Format 0</em> vai līdzīgu, nelielu failu):</p>
+  <input type="file" id="lasFile" accept=".las" />
+
+  <p>2) Ielādējiet <strong>CSV failu</strong> (kolonnas x,y,z vai X,Y,Z, EPSG:3059):</p>
   <input type="file" id="csvFile" accept=".csv,text/csv" />
 
   <br><br>
   <button id="processBtn">Sākt apstrādi</button>
-  
+
+  <div id="error"></div>
   <div id="results"></div>
 
-  <!-- PapaParse CSV lasīšanai -->
+  <!-- Papa Parse bibliotēka CSV parsēšanai -->
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 
-  <!-- Izmanto ES moduļus -->
-  <script type="module">
-    import {load} from 'https://cdn.jsdelivr.net/npm/@loaders.gl/core@3.2.3/dist/esm/index.js';
-    import {LASLoader} from 'https://cdn.jsdelivr.net/npm/@loaders.gl/las@3.2.3/dist/esm/index.js';
-
+  <script>
     const lasInput = document.getElementById('lasFile');
     const csvInput = document.getElementById('csvFile');
     const processBtn = document.getElementById('processBtn');
+    const errorDiv = document.getElementById('error');
     const resultsDiv = document.getElementById('results');
 
-    let lasPoints = [];
-    let csvPoints = [];
+    let lasPoints = []; // Te saglabāsim nolasītos LAS punktus {x, y, z}
+    let csvPoints = []; // Te saglabāsim CSV punktus {x, y, z}
 
-    // ---------------------------------------------
-    // 1) Nolasa .las / .laz failu ar loaders.gl
-    // ---------------------------------------------
+    // ============================================================
+    // 1. Paštaisīts minimāls LAS parseris (atbalsta LAS 1.2/1.3, Point Data Format 0)
+    //    - Nelasa intensitāti, GPS laiku, krāsu, utt.
+    //    - PIEZĪME: Šis kods ir DEMO vajadzībām, nav pilnīga LAS standarta implementācija.
+    // ============================================================
     async function parseLAS(file) {
-      const arrayBuffer = await file.arrayBuffer();
-      const data = await load(arrayBuffer, LASLoader);
-      // data -> { loader, header, points, ... }
-      
-      // data.points ir objekts, kas satur "POSITION", "Intensity" u.c.
-      // POSITION ir Float32Array: [x1, y1, z1, x2, y2, z2, ...]
-      // Koordinātas jau mērogotas + offsetotas reālajās vienībās
-      // (jaunākās loaders.gl versijās).
-      // Pārbaudiet data.header.scale un data.header.offset, ja vajag manual korekciju.
+      const buffer = await file.arrayBuffer();
+      const dataView = new DataView(buffer);
 
-      const {POSITION} = data.points;
-      // POSITION.length = 3 * pointCount
-      // tātad punkti:
-      const pointCount = POSITION.length / 3;
-      const pointsArray = [];
-      for (let i = 0; i < pointCount; i++) {
-        const x = POSITION[3*i + 0];
-        const y = POSITION[3*i + 1];
-        const z = POSITION[3*i + 2];
-        pointsArray.push({x, y, z});
+      // -------------------------------
+      // 1) Pārbaudām "LASF" signatūru
+      // -------------------------------
+      // Baiti [0..3] satur "LASF"
+      const signature = String.fromCharCode(
+        dataView.getUint8(0),
+        dataView.getUint8(1),
+        dataView.getUint8(2),
+        dataView.getUint8(3)
+      );
+      if (signature !== "LASF") {
+        throw new Error("Faila formāts nav LAS (trūkst 'LASF' signatūra)");
       }
+
+      // -------------------------------
+      // 2) Nolasām galveni:
+      //    - LAS versiju, point offset,
+      //    - number of point records,
+      //    - scale, offset
+      // -------------------------------
+      //   * Sīkāk: https://www.asprs.org/wp-content/uploads/2019/07/LAS_1_4_r15.pdf
+      //   * Te izmantojam ofsetus no LAS 1.2/1.3 spec. Dažādiem formātiem var atšķirties.
+
+      // Versijas lauki:
+      const versionMajor = dataView.getUint8(24, true);
+      const versionMinor = dataView.getUint8(25, true);
+
+      // "Header Size" (2 baitos, parasti 227) - bet tas var būt lielāks LAS 1.4
+      const headerSize = dataView.getUint16(94, true);
+
+      // "Offset to point data" - 4 baiti (int)
+      // norāda, kur sākas punktu ieraksti
+      const pointDataOffset = dataView.getUint32(96, true);
+
+      // Number of point records (4 baiti) atrodas 107. baitā (LAS 1.2, 1.3)
+      const numPoints = dataView.getUint32(107, true);
+
+      // X/Y/Z scale factors (3 * 8 baiti) atrodas 131..146
+      const scaleX = dataView.getFloat64(131, true);
+      const scaleY = dataView.getFloat64(139, true);
+      const scaleZ = dataView.getFloat64(147, true);
+
+      // X/Y/Z offsets (3 * 8 baiti) atrodas 155..170
+      const offsetX = dataView.getFloat64(155, true);
+      const offsetY = dataView.getFloat64(163, true);
+      const offsetZ = dataView.getFloat64(171, true);
+
+      // Point Data Record Format (1 baits) pie 104. baitu indeksa (LAS 1.2/1.3)
+      const pointDataFormat = dataView.getUint8(104);
+      // Point Data Record Length (2 baiti) pie 105. baitu indeksa
+      const pointRecordLen = dataView.getUint16(105, true);
+
+      // Elementāra pārbaude - atbalstām tikai formātu 0 (20 baiti), 1 (28 baiti), 3 (34 baiti) utt.
+      // Šeit, demonstrācijai, pieņemsim formātu 0 (X, Y, Z, intensity, classification = 20b).
+      // Ja failā cits formāts, var mest kļūdu vai pieskaņot loģiku.
+      if (![0,1,2,3].includes(pointDataFormat)) {
+        throw new Error("Šis parseris atbalsta tikai Point Data Record Format 0..3 (demonstrācija). Failam ir " + pointDataFormat);
+      }
+
+      // -------------------------------
+      // 3) Nolasām punktus
+      // -------------------------------
+      // Katrs punkts satur X, Y, Z kā 4 baitu "signed int" [little-endian].
+      // Formātā 0: punkti sākas pie pointDataOffset.
+      // Katra punkta garums = pointRecordLen (20 baiti formātam 0).
+      // X atrodas [0..3], Y [4..7], Z [8..11].
+      // (intensitāte [12..13], utt. - šeit ignorējam)
+      // -------------------------------
+      
+      const pointsArray = [];
+      let offset = pointDataOffset;
+      
+      for (let i = 0; i < numPoints; i++) {
+        const Xint = dataView.getInt32(offset + 0, true);
+        const Yint = dataView.getInt32(offset + 4, true);
+        const Zint = dataView.getInt32(offset + 8, true);
+
+        // Konvertējam uz "reālajām" koordinātēm
+        const X = Xint * scaleX + offsetX;
+        const Y = Yint * scaleY + offsetY;
+        const Z = Zint * scaleZ + offsetZ;
+
+        pointsArray.push({x: X, y: Y, z: Z});
+
+        offset += pointRecordLen;
+      }
+
       return pointsArray;
     }
 
-    // ---------------------------------------------
-    // 2) Nolasa CSV ar Papa Parse
-    // ---------------------------------------------
+    // ============================================================
+    // 2. CSV lasīšana ar Papa Parse
+    // ============================================================
     function parseCSV(file) {
       return new Promise((resolve, reject) => {
         Papa.parse(file, {
@@ -111,9 +189,9 @@
       });
     }
 
-    // ---------------------------------------------
-    // 3) Meklē tuvāko LAS punktu 20cm rādiusā
-    // ---------------------------------------------
+    // ============================================================
+    // 3. Meklē tuvāko LAS punktu 20 cm rādiusā
+    // ============================================================
     function findNearestLASPoint(csvPt, maxDistance = 0.2) {
       let nearest = null;
       let minDist = Infinity;
@@ -129,57 +207,68 @@
       return nearest;
     }
 
-    // ---------------------------------------------
-    // 4) Process (pogas klikšķis)
-    // ---------------------------------------------
+    // ============================================================
+    // 4. Process poga: ielasa LAS, CSV un salīdzina
+    // ============================================================
     processBtn.addEventListener('click', async () => {
+      errorDiv.textContent = "";
+      resultsDiv.innerHTML = "";
+
       if (!lasInput.files.length || !csvInput.files.length) {
-        alert("Lūdzu, atlasiet gan LAS/LAZ, gan CSV failu!");
+        errorDiv.textContent = "Lūdzu atlasiet gan LAS, gan CSV failu.";
         return;
       }
-      resultsDiv.innerHTML = "Notiek datu ielāde, lūdzu uzgaidiet...";
 
       try {
-        // Nolasām visus LAS punktus
+        resultsDiv.innerHTML = "<p>Ielasu LAS un CSV, uzgaidiet...</p>";
+        
+        // Nolasām LAS
         lasPoints = await parseLAS(lasInput.files[0]);
+        
         // Nolasām CSV
         csvPoints = await parseCSV(csvInput.files[0]);
 
-        // Apstrāde un rezultātu ģenerēšana
+        // Veicam salīdzināšanu
         const rows = [];
-        rows.push("<tr><th>CSV X</th><th>CSV Y</th><th>CSV Z</th><th>LAS Z</th><th>ΔZ</th><th>Attālums 2D</th></tr>");
-
-        for (const cpt of await csvPoints) {
+        rows.push("<tr><th>CSV X</th><th>CSV Y</th><th>CSV Z</th><th>LAS Z</th><th>ΔZ (CSV-LAS)</th><th>2D attālums</th></tr>");
+        for (const cpt of csvPoints) {
           const nearest = findNearestLASPoint(cpt, 0.2);
           if (nearest) {
             const dz = cpt.z - nearest.z;
-            const dist2D = Math.sqrt(Math.pow(nearest.x - cpt.x, 2) + Math.pow(nearest.y - cpt.y, 2));
-            rows.push(`<tr>
-              <td>${cpt.x.toFixed(3)}</td>
-              <td>${cpt.y.toFixed(3)}</td>
-              <td>${cpt.z.toFixed(3)}</td>
-              <td>${nearest.z.toFixed(3)}</td>
-              <td>${dz.toFixed(3)}</td>
-              <td>${dist2D.toFixed(3)}</td>
-            </tr>`);
+            const dist2D = Math.sqrt((nearest.x - cpt.x)**2 + (nearest.y - cpt.y)**2);
+            rows.push(`
+              <tr>
+                <td>${cpt.x.toFixed(3)}</td>
+                <td>${cpt.y.toFixed(3)}</td>
+                <td>${cpt.z.toFixed(3)}</td>
+                <td>${nearest.z.toFixed(3)}</td>
+                <td>${dz.toFixed(3)}</td>
+                <td>${dist2D.toFixed(3)}</td>
+              </tr>
+            `);
           } else {
-            // Ja nav atrasts tuvākais <=20cm
-            rows.push(`<tr>
-              <td>${cpt.x.toFixed(3)}</td>
-              <td>${cpt.y.toFixed(3)}</td>
-              <td>${cpt.z.toFixed(3)}</td>
-              <td>-</td>
-              <td>-</td>
-              <td>-</td>
-            </tr>`);
+            // Ja nav atrasts <= 20 cm
+            rows.push(`
+              <tr>
+                <td>${cpt.x.toFixed(3)}</td>
+                <td>${cpt.y.toFixed(3)}</td>
+                <td>${cpt.z.toFixed(3)}</td>
+                <td>-</td>
+                <td>-</td>
+                <td>-</td>
+              </tr>
+            `);
           }
         }
 
-        const tableHtml = `<table>${rows.join('')}</table>`;
-        resultsDiv.innerHTML = "<h3>Rezultāti</h3>" + tableHtml;
+        resultsDiv.innerHTML = `
+          <h3>Rezultāti</h3>
+          <p>LAS punkti: ${lasPoints.length}, CSV punkti: ${csvPoints.length}</p>
+          <table>${rows.join("")}</table>
+        `;
       } catch (err) {
         console.error(err);
-        resultsDiv.innerHTML = `<p>Kļūda: ${err.message}</p>`;
+        errorDiv.textContent = "Kļūda: " + err.message;
       }
     });
   </script>
