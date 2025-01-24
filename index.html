@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LAS un CSV Salīdzināšana</title>
+    <!-- Iekļaujiet las-js bibliotēku -->
+    <script src="https://cdn.jsdelivr.net/npm/las-js@1.0.0/dist/las.min.js"></script>
     <script src="https://cdn.jsdelivr.net/pyodide/v0.23.4/full/pyodide.js"></script>
     <link rel="stylesheet" href="styles.css">
 </head>
@@ -60,18 +62,29 @@
                 }
 
                 lasReader.onload = async function(eventLas) {
-                    let lasData = eventLas.result;
-                    
-                    // Šeit varētu būt LAS failu apstrāde, ja tā būtu iespējama
-                    // Pašlaik LAS punkti tiek simulēti
+                    let lasArrayBuffer = eventLas.result;
 
-                    let pyodide = await loadPyodide();
-                    await pyodide.loadPackage(["numpy", "pandas", "scipy"]);
+                    // Parsējiet LAS failu ar las-js
+                    try {
+                        let las = LASParser.parse(lasArrayBuffer);
+                        let lasPoints = las.points.map(point => [point.x, point.y, point.z]);
 
-                    let code = `
+                        if (lasPoints.length === 0) {
+                            document.getElementById("output").innerText = "LAS fails nesatur punktus!";
+                            return;
+                        }
+
+                        let pyodide = await loadPyodide();
+                        await pyodide.loadPackage(["numpy", "pandas", "scipy"]);
+
+                        // Pārvērtiet LAS punktus uz JSON formātu, lai tos varētu izmantot Python pusē
+                        let lasPointsJSON = JSON.stringify(lasPoints);
+
+                        let code = `
 import pandas as pd
 import numpy as np
 from scipy.spatial import cKDTree
+import json
 from io import StringIO
 
 try:
@@ -80,13 +93,17 @@ try:
     if csv_df.empty:
         raise ValueError("CSV fails nesatur datus.")
     
-    if not {'x', 'y', 'z'}.issubset(csv_df.columns):
+    required_columns = {'x', 'y', 'z'}
+    if not required_columns.issubset(csv_df.columns):
         raise ValueError("CSV fails jāietver 'x', 'y' un 'z' kolonnas.")
 
     csv_points = csv_df[['x', 'y', 'z']].to_numpy()
 
-    # Simulēti LAS punkti (aizvietojiet ar reālo LAS datu apstrādi)
-    las_points = np.random.rand(len(csv_points), 3) * 100  # Simulējam 100x100m punktu sadalījumu
+    # Ielādē LAS punktus no JSON
+    las_points = np.array(json.loads("""${lasPointsJSON}"""))
+
+    if las_points.size == 0:
+        raise ValueError("LAS fails nesatur punktus.")
 
     # Izveidojiet KDTree priekš LAS punktiem
     tree = cKDTree(las_points[:, :2])
@@ -94,21 +111,14 @@ try:
 
     # Izveidojiet masku, kas nosaka derīgos indeksus
     mask = distances < ${maxDistance}
+    valid_indices = indices < len(las_points)
+    final_mask = mask & valid_indices
 
-    if not np.any(mask):
+    if not np.any(final_mask):
         raise ValueError("Nav atrasti LAS punkti noteiktajā attāluma robežās.")
 
     # Inicializējiet Z_Difference ar NaN
     z_diff = np.full(len(csv_points), np.nan)
-
-    # Pārbaudiet, vai indeksi ir derīgi, lai izvairītos no IndexError
-    valid_indices = indices < len(las_points)
-
-    # Aplikējiet masku, lai atzīmētu tikai derīgos punktus
-    final_mask = mask & valid_indices
-
-    if not np.any(final_mask):
-        raise ValueError("Nav derīgu LAS punktu salīdzināšanai ar CSV punktiem.")
 
     # Aprēķiniet Z_Difference tikai tiem punktiem, kas atrodas attāluma robežās
     z_diff[final_mask] = csv_points[final_mask, 2] - las_points[indices[final_mask], 2]
@@ -122,37 +132,46 @@ try:
 
     # Konvertējiet rezultātu uz CSV
     result_csv = csv_df.to_csv(index=False)
+
 except Exception as e:
     result_csv = str(e)
-`;
 
-                    try {
-                        let result = await pyodide.runPythonAsync(code);
-                        
-                        // Pārbaudiet, vai rezultāts satur "Z_Difference" kolonnas
-                        if (result.includes("Z_Difference")) {
-                            document.getElementById("output").innerText = "Rezultāti sagatavoti. Lejupielādējiet CSV.";
-                            downloadCsv(result);
-                        } else {
-                            // Ja rezultāts nesatur "Z_Difference", tas ir kļūdas ziņojums
-                            document.getElementById("output").innerText = result;
+result_csv
+                        `;
+
+                        try {
+                            let result = await pyodide.runPythonAsync(code);
+                            
+                            // Pārbaudiet, vai rezultāts satur "Z_Difference" kolonnas
+                            if (result.includes("Z_Difference")) {
+                                document.getElementById("output").innerText = "Rezultāti sagatavoti. Lejupielādējiet CSV.";
+                                downloadCsv(result);
+                            } else {
+                                // Ja rezultāts nesatur "Z_Difference", tas ir kļūdas ziņojums
+                                document.getElementById("output").innerText = result;
+                            }
+                        } catch (error) {
+                            console.error(error);
+                            document.getElementById("output").innerText = "Kļūda apstrādājot failus.";
                         }
-                    } catch (error) {
-                        console.error(error);
-                        document.getElementById("output").innerText = "Kļūda apstrādājot failus.";
+                    } catch (parseError) {
+                        console.error(parseError);
+                        document.getElementById("output").innerText = "Kļūda parsējot LAS failu.";
                     }
                 };
 
-                // LAS failu apstrāde var prasīt citu metodi atkarībā no tā formāta
-                // Šeit tiek izmantots kā teksts, bet LAS ir binārs formāts
-                // Lai pareizi apstrādātu, nepieciešama LAS parser bibliotēka
-                lasReader.readAsText(lasFile);
+                // LAS failu apstrāde kā ArrayBuffer
+                lasReader.readAsArrayBuffer(lasFile);
             };
 
             csvReader.readAsText(csvFile);
         }
 
         function downloadCsv(csvContent) {
+            if (!csvContent || csvContent === 'undefined') {
+                alert("Nav ko lejupielādēt.");
+                return;
+            }
             let blob = new Blob([csvContent], { type: "text/csv" });
             let link = document.createElement("a");
             link.href = URL.createObjectURL(blob);
