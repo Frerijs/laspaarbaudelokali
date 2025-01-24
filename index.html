@@ -2,7 +2,7 @@
 <html lang="lv">
 <head>
   <meta charset="UTF-8">
-  <title>LAS + CSV salīdzināšana (kdbush kā funkcija)</title>
+  <title>LAS + CSV salīdzināšana chunkos (EPSG:3059)</title>
   <style>
     body {
       font-family: sans-serif;
@@ -13,8 +13,7 @@
       width: 100%;
       margin-top: 1rem;
     }
-    #results th,
-    #results td {
+    #results th, #results td {
       border: 1px solid #ccc;
       padding: 6px 10px;
       text-align: left;
@@ -26,101 +25,41 @@
   </style>
 </head>
 <body>
-  <h1>LAS un CSV salīdzināšana (ar kdbush funkciju)</h1>
+  <h1>LAS + CSV salīdzināšana, lasot chunkus pārlūkā</h1>
   <p>
-    Ielādējiet <strong>LAS</strong> failu (EPSG:3059, <em>Point Data Format</em> 0..3) un
-    <strong>CSV</strong> failu (x,y,z). Tiks izveidots kd-bush indekss, lai ātrāk meklētu
-    tuvākos LAS punktus 20&nbsp;cm rādiusā.
+    Ielādējam <strong>galveni</strong> un tad punktus pa daļām, lai nav jāglabā viss faila saturs atmiņā.
+    Meklējam tuvāko &le;20cm katram CSV punktam (2D X-Y), lai noteiktu ΔZ.
   </p>
 
-  <p>LAS fails:</p>
+  <p><strong>LAS fails</strong> (EPSG:3059):</p>
   <input type="file" id="lasFile" accept=".las" />
 
-  <p>CSV fails:</p>
+  <p><strong>CSV fails</strong> (EPSG:3059, kolonnas x,y,z):</p>
   <input type="file" id="csvFile" accept=".csv,text/csv" />
 
-  <br>
+  <br/>
   <button id="processBtn">Sākt apstrādi</button>
 
   <div id="error"></div>
   <div id="results"></div>
 
-  <!-- Papa Parse CSV parsēšanai -->
+  <!-- Papa Parse bibliotēka CSV parsēšanai -->
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 
-  <!-- kdbush UMD fails: window.kdbush ir FUNKCIJA, nevis klase -->
-  <script src="https://cdn.jsdelivr.net/npm/kdbush@3.0.0/kdbush.umd.js"></script>
-
   <script>
-    const errorDiv = document.getElementById('error');
-    const resultsDiv = document.getElementById('results');
-    const lasFileInput = document.getElementById('lasFile');
-    const csvFileInput = document.getElementById('csvFile');
-    const processBtn = document.getElementById('processBtn');
+    const lasInput = document.getElementById("lasFile");
+    const csvInput = document.getElementById("csvFile");
+    const processBtn = document.getElementById("processBtn");
+    const errorDiv = document.getElementById("error");
+    const resultsDiv = document.getElementById("results");
 
-    // kdbush funkcija
-    const kdbushFn = window.kdbush;
-
-    let lasPoints = [];
     let csvPoints = [];
-    let kdbIndex = null;
+    let bestDist = []; // saglabāsim labāko attālumu CSV punktiem
+    let bestLASZ = []; // saglabāsim LAS Z (labākajam punktam)
 
-    // =============================================
-    // 1) Vienkāršs LAS parseris (formāts 0..3)
-    // =============================================
-    async function parseLAS(file) {
-      const buffer = await file.arrayBuffer();
-      const dv = new DataView(buffer);
-
-      // "LASF" signatūra
-      const signature = String.fromCharCode(
-        dv.getUint8(0),
-        dv.getUint8(1),
-        dv.getUint8(2),
-        dv.getUint8(3)
-      );
-      if (signature !== "LASF") {
-        throw new Error("Failam trūkst 'LASF' signatūra. Vai tas ir .las fails?");
-      }
-
-      const pointDataOffset = dv.getUint32(96, true);
-      const numPoints = dv.getUint32(107, true);
-
-      const scaleX = dv.getFloat64(131, true);
-      const scaleY = dv.getFloat64(139, true);
-      const scaleZ = dv.getFloat64(147, true);
-      const offsetX = dv.getFloat64(155, true);
-      const offsetY = dv.getFloat64(163, true);
-      const offsetZ = dv.getFloat64(171, true);
-
-      const pointDataFormat = dv.getUint8(104);
-      const pointRecordLen = dv.getUint16(105, true);
-
-      if (![0,1,2,3].includes(pointDataFormat)) {
-        throw new Error("Neparedzēts Point Data Format: " + pointDataFormat);
-      }
-
-      const pointsArr = [];
-      let off = pointDataOffset;
-      for (let i = 0; i < numPoints; i++) {
-        const Xint = dv.getInt32(off + 0, true);
-        const Yint = dv.getInt32(off + 4, true);
-        const Zint = dv.getInt32(off + 8, true);
-
-        const X = Xint * scaleX + offsetX;
-        const Y = Yint * scaleY + offsetY;
-        const Z = Zint * scaleZ + offsetZ;
-
-        pointsArr.push({x: X, y: Y, z: Z});
-        off += pointRecordLen;
-      }
-
-      return pointsArr;
-    }
-
-    // =============================================
-    // 2) CSV parsēšana ar PapaParse -> {x,y,z}
-    // =============================================
+    // =======================================================
+    // 1) Nolasa CSV, konvertē uz {x,y,z}, sagatavo bestDist / bestLASZ
+    // =======================================================
     function parseCSV(file) {
       return new Promise((resolve, reject) => {
         Papa.parse(file, {
@@ -128,8 +67,8 @@
           skipEmptyLines: true,
           complete: (results) => {
             try {
-              const arr = results.data;
-              const points = arr.map(row => {
+              const data = results.data;
+              const points = data.map(row => {
                 const keys = {};
                 for (let k of Object.keys(row)) {
                   keys[k.toLowerCase()] = row[k];
@@ -149,111 +88,176 @@
       });
     }
 
-    // =============================================
-    // 3) Izveido k-d tree ar kdbush (funkciju)
-    // =============================================
-    function buildKDBushIndex(points) {
-      return kdbushFn(
-        points,
-        p => p.x, // x accessor
-        p => p.y, // y accessor
-        64,
-        Float32Array
-      );
+    // =======================================================
+    // 2) Nolasa LAS galveni, lai uzzinātu offset, scale, u.c.
+    //    + atgriež numPoints, pointDataOffset, pointRecordLen, scale, offset
+    // =======================================================
+    async function readLASHeader(file) {
+      const headerSize = 375; // lasām "nedaudz vairāk" par minimālo, lai iekļautos
+      const blob = file.slice(0, headerSize);
+      const buffer = await blob.arrayBuffer();
+      const dv = new DataView(buffer);
+
+      // Pārbaudām "LASF"
+      const signature = String.fromCharCode(dv.getUint8(0), dv.getUint8(1), dv.getUint8(2), dv.getUint8(3));
+      if (signature !== "LASF") {
+        throw new Error("Trūkst 'LASF' signatūra. Vai tas ir LAS fails?");
+      }
+
+      const pointDataOffset = dv.getUint32(96, true);  // [96..99]
+      const numPoints = dv.getUint32(107, true);       // [107..110]
+      const scaleX = dv.getFloat64(131, true);
+      const scaleY = dv.getFloat64(139, true);
+      const scaleZ = dv.getFloat64(147, true);
+      const offsetX = dv.getFloat64(155, true);
+      const offsetY = dv.getFloat64(163, true);
+      const offsetZ = dv.getFloat64(171, true);
+
+      const pointDataFormat = dv.getUint8(104);
+      const pointRecordLen = dv.getUint16(105, true);
+
+      if (![0,1,2,3].includes(pointDataFormat)) {
+        throw new Error("Neparedzēts Point Data Format: " + pointDataFormat);
+      }
+
+      return {
+        numPoints,
+        pointDataOffset,
+        pointRecordLen,
+        scale: [scaleX, scaleY, scaleZ],
+        offset: [offsetX, offsetY, offsetZ]
+      };
     }
 
-    // =============================================
-    // 4) Meklē tuvāko LAS punktu 20cm rādiusā
-    //    izmantojot index.range() + manuālu dist
-    // =============================================
-    function findNearestLASPointKD(csvPt, radius = 0.2) {
-      const minX = csvPt.x - radius;
-      const minY = csvPt.y - radius;
-      const maxX = csvPt.x + radius;
-      const maxY = csvPt.y + radius;
+    // =======================================================
+    // 3) Funkcija, kas nolasa vienu "chunk" (n punkti) no faila, sākot no "byteOffset"
+    //    un salīdzina ar CSV punktiem. Neuzglabā chunk ilgāk par apstrādes laiku.
+    // =======================================================
+    async function processLASChunk(file, byteOffset, pointsToRead, recordLen, scale, offset) {
+      const chunkBytes = pointsToRead * recordLen;
+      const blob = file.slice(byteOffset, byteOffset + chunkBytes);
+      const buffer = await blob.arrayBuffer();
+      const dv = new DataView(buffer);
 
-      const candidateIndices = kdbIndex.range(minX, minY, maxX, maxY);
-      let nearest = null;
-      let minDist = Infinity;
+      // Dekodējam katru punktu, meklējam, vai tuvāks CSV punktiem
+      let chunkOffset = 0;
+      for (let i = 0; i < pointsToRead; i++) {
+        const Xint = dv.getInt32(chunkOffset + 0, true);
+        const Yint = dv.getInt32(chunkOffset + 4, true);
+        const Zint = dv.getInt32(chunkOffset + 8, true);
 
-      for (const idx of candidateIndices) {
-        const lasPt = lasPoints[idx];
-        const dx = lasPt.x - csvPt.x;
-        const dy = lasPt.y - csvPt.y;
-        const dist = Math.sqrt(dx*dx + dy*dy);
-        if (dist < minDist && dist <= radius) {
-          minDist = dist;
-          nearest = lasPt;
+        const X = Xint * scale[0] + offset[0];
+        const Y = Yint * scale[1] + offset[1];
+        const Z = Zint * scale[2] + offset[2];
+
+        chunkOffset += recordLen;
+
+        // Tālāk – naiva meklēšana CSV punktos (O(M)).
+        // Ja CSV ir liels, tas būs lēns.
+        // Jaunākajās versijās varbūt lietot k-d tree CSV pusē?
+        for (let c = 0; c < csvPoints.length; c++) {
+          // Pārbaudām, vai varbūt šis LAS punkts ir tuvāks
+          const dx = csvPoints[c].x - X;
+          const dy = csvPoints[c].y - Y;
+          const dist2D = Math.sqrt(dx*dx + dy*dy);
+          if (dist2D <= 0.2 && dist2D < bestDist[c]) {
+            bestDist[c] = dist2D;
+            bestLASZ[c] = Z;
+          }
         }
       }
-      return nearest;
     }
 
-    // =============================================
-    // 5) Process poga
-    // =============================================
-    processBtn.addEventListener('click', async () => {
+    // =======================================================
+    // 4) Kopējais process
+    // =======================================================
+    processBtn.addEventListener("click", async () => {
       errorDiv.textContent = "";
       resultsDiv.innerHTML = "";
 
-      if (!lasFileInput.files.length || !csvFileInput.files.length) {
-        errorDiv.textContent = "Lūdzu, atlasiet gan LAS, gan CSV failu!";
+      if (!lasInput.files.length || !csvInput.files.length) {
+        errorDiv.textContent = "Lūdzu, izvēlieties gan LAS, gan CSV failu!";
         return;
       }
 
       try {
-        resultsDiv.innerHTML = "<p>Ielādē un sagatavo datus, lūdzu uzgaidiet...</p>";
+        resultsDiv.innerHTML = "Lasa CSV...";
+        // 1) Ielādējam CSV
+        csvPoints = await parseCSV(csvInput.files[0]);
+        // Iniciējam "labākos" attālumus ar Infinity
+        bestDist = new Array(csvPoints.length).fill(Infinity);
+        bestLASZ = new Array(csvPoints.length).fill(null);
 
-        // 1) LasPoints
-        lasPoints = await parseLAS(lasFileInput.files[0]);
-
-        // 2) Izveido k-d index
-        kdbIndex = buildKDBushIndex(lasPoints);
-
-        // 3) CSV punkti
-        csvPoints = await parseCSV(csvFileInput.files[0]);
-
-        // 4) Meklē tuvāko
-        const tableRows = [];
-        tableRows.push("<tr><th>CSV X</th><th>CSV Y</th><th>CSV Z</th><th>LAS Z</th><th>ΔZ (CSV-LAS)</th><th>2D dist</th></tr>");
+        // 2) Nolasa LAS galvenes informāciju
+        resultsDiv.innerHTML = "Lasa LAS galveni...";
+        const {numPoints, pointDataOffset, pointRecordLen, scale, offset} = await readLASHeader(lasInput.files[0]);
         
-        for (const cpt of csvPoints) {
-          const nearest = findNearestLASPointKD(cpt, 0.2);
-          if (nearest) {
-            const dz = cpt.z - nearest.z;
-            const dist2D = Math.sqrt((nearest.x - cpt.x)**2 + (nearest.y - cpt.y)**2);
-            tableRows.push(`
-              <tr>
-                <td>${cpt.x.toFixed(3)}</td>
-                <td>${cpt.y.toFixed(3)}</td>
-                <td>${cpt.z.toFixed(3)}</td>
-                <td>${nearest.z.toFixed(3)}</td>
-                <td>${dz.toFixed(3)}</td>
-                <td>${dist2D.toFixed(3)}</td>
-              </tr>
-            `);
-          } else {
-            tableRows.push(`
-              <tr>
-                <td>${cpt.x.toFixed(3)}</td>
-                <td>${cpt.y.toFixed(3)}</td>
-                <td>${cpt.z.toFixed(3)}</td>
-                <td>-</td>
-                <td>-</td>
-                <td>-</td>
-              </tr>
-            `);
-          }
+        // 3) Chunk iestatījumi
+        const CHUNK_SIZE = 100000; // cik punktus lasām vienā chunk
+        const totalPoints = numPoints;
+        let pointsRemaining = totalPoints;
+
+        let currentByteOffset = pointDataOffset;
+        const file = lasInput.files[0];
+
+        // 4) Iterējam chunkus
+        let chunkIndex = 0;
+
+        while (pointsRemaining > 0) {
+          chunkIndex++;
+          const pointsToRead = Math.min(CHUNK_SIZE, pointsRemaining);
+          resultsDiv.innerHTML = `
+            <p>Apstrādā chunk #${chunkIndex}, punktu: ${totalPoints - pointsRemaining + 1} - ${totalPoints - pointsRemaining + pointsToRead}
+               (no ${totalPoints})...</p>
+          `;
+          // Apstrādā chunk
+          await processLASChunk(file, currentByteOffset, pointsToRead, pointRecordLen, scale, offset);
+
+          // Atjaunina offset, samazina remaining
+          currentByteOffset += pointsToRead * pointRecordLen;
+          pointsRemaining -= pointsToRead;
         }
 
-        resultsDiv.innerHTML = `
-          <h3>Rezultāti</h3>
-          <p>LAS punkti: ${lasPoints.length}, CSV punkti: ${csvPoints.length}</p>
-          <table>${tableRows.join("")}</table>
+        // 5) Kad viss done, ģenerējam rezultātu
+        resultsDiv.innerHTML = "<h3>Rezultāti</h3>";
+        let html = `<table>
+          <tr><th>CSV X</th><th>CSV Y</th><th>CSV Z</th><th>LAS Z</th><th>ΔZ (CSV-LAS)</th><th>2D attālums</th></tr>
         `;
+
+        for (let i = 0; i < csvPoints.length; i++) {
+          const dist = bestDist[i];
+          if (dist < Infinity) {
+            const dz = csvPoints[i].z - bestLASZ[i];
+            html += `
+              <tr>
+                <td>${csvPoints[i].x.toFixed(3)}</td>
+                <td>${csvPoints[i].y.toFixed(3)}</td>
+                <td>${csvPoints[i].z.toFixed(3)}</td>
+                <td>${bestLASZ[i].toFixed(3)}</td>
+                <td>${dz.toFixed(3)}</td>
+                <td>${dist.toFixed(3)}</td>
+              </tr>
+            `;
+          } else {
+            // Nav neviena LAS punkta <=20cm
+            html += `
+              <tr>
+                <td>${csvPoints[i].x.toFixed(3)}</td>
+                <td>${csvPoints[i].y.toFixed(3)}</td>
+                <td>${csvPoints[i].z.toFixed(3)}</td>
+                <td>-</td>
+                <td>-</td>
+                <td>-</td>
+              </tr>
+            `;
+          }
+        }
+        html += "</table>";
+        resultsDiv.innerHTML += html;
+
       } catch (err) {
         console.error(err);
-        errorDiv.textContent = err.message;
+        errorDiv.textContent = "Kļūda: " + err.message;
       }
     });
   </script>
