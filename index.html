@@ -193,7 +193,7 @@
         const {numPoints, pointDataOffset, pointRecordLen, scale, offset} = await readLASHeader(lasInput.files[0]);
         
         // 3) Chunk iestatījumi
-        const CHUNK_SIZE = 100000; // cik punktus lasām vienā chunk
+        const CHUNK_SIZE = 1000000; // cik punktus lasām vienā chunk
         const totalPoints = numPoints;
         let pointsRemaining = totalPoints;
 
