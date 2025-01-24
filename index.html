@@ -1,3 +1,9 @@
-<head>
-    <script src="https://cdn.jsdelivr.net/gh/potree/potree@1.8.0/build/potree.min.js"></script>
-</head>
+<script>
+    window.onload = function() {
+        if (typeof Potree === "undefined") {
+            console.error("Potree is not loaded! Pārbaudi, vai fails tiek pareizi ielādēts.");
+        } else {
+            console.log("Potree veiksmīgi ielādēts!");
+        }
+    };
+</script>
