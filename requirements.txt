@@ -1,5 +1,1 @@
 streamlit
-pandas
-laspy
-numpy
-scipy
