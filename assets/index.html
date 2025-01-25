@@ -4,28 +4,46 @@
   <meta charset="UTF-8">
   <title>LAS + CSV (Ground punkti) + Statistika + Kļūdu klasifikācija</title>
   <style>
+    /* Izmantojam līdzīgu fontu kā Streamlit */
     body {
-      font-family: sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
       margin: 20px;
+      background-color: #f8f9fa; /* Viegls fons, līdzīgs Streamlit */
+    }
+    h1 {
+      color: #262730;
+      font-size: 2em;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+    h3, h4 {
+      color: #262730;
+    }
+    p, li {
+      color: #262730;
+      font-size: 1em;
     }
     #results table {
       border-collapse: collapse;
       width: 100%;
       margin-top: 1rem;
+      background-color: white;
     }
     #results th, #results td {
       border: 1px solid #ccc;
-      padding: 6px 10px;
+      padding: 8px 12px;
       text-align: left;
     }
     #error {
       color: red;
       font-weight: bold;
+      margin-top: 10px;
     }
-    /* Pievienojiet Streamlit stilus */
-    h1 {
-      color: #262730;
+    #status {
+      margin-top: 10px;
+      color: #333;
     }
+    /* Pogas dizains, līdzīgs Streamlit */
     button {
       background-color: #0099ff;
       color: white;
@@ -38,11 +56,41 @@
       margin: 4px 2px;
       cursor: pointer;
       border-radius: 5px;
+      transition: background-color 0.3s ease;
     }
+    button:hover {
+      background-color: #007acc;
+    }
+    /* Ievades lauki līdzīgi Streamlit */
     input[type="file"], input[type="number"] {
-      padding: 5px;
+      padding: 8px;
       margin-bottom: 10px;
-      border-radius: 3px;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+      width: 100%;
+      box-sizing: border-box;
+      font-size: 14px;
+    }
+    /* Leģendas un citi elementi */
+    .legend {
+      padding: 8px;
+      background-color: white;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      margin-top: 20px;
+    }
+    .legend div {
+      display: flex;
+      align-items: center;
+      margin-bottom: 4px;
+    }
+    .legend div:last-child {
+      margin-bottom: 0;
+    }
+    .legend div div {
+      width: 14px;
+      height: 14px;
+      margin-right: 6px;
       border: 1px solid #ccc;
     }
   </style>
@@ -51,7 +99,7 @@
   <h1>LAS (Ground=2) un CSV salīdzināšana + Kļūdu klasifikācija</h1>
 
   <p><strong>LAS fails (EPSG:3059):</strong></p>
-  <input type="file" id="lasFile" accept=".las" />
+  <input type="file" id="lasFile" accept=".las,.laz" />
 
   <p><strong>CSV fails (EPSG:3059, x,y,z):</strong></p>
   <input type="file" id="csvFile" accept=".csv,text/csv" />
