@@ -22,6 +22,29 @@
       color: red;
       font-weight: bold;
     }
+    /* Pievienojiet Streamlit stilus */
+    h1 {
+      color: #262730;
+    }
+    button {
+      background-color: #0099ff;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      text-align: center;
+      text-decoration: none;
+      display: inline-block;
+      font-size: 16px;
+      margin: 4px 2px;
+      cursor: pointer;
+      border-radius: 5px;
+    }
+    input[type="file"], input[type="number"] {
+      padding: 5px;
+      margin-bottom: 10px;
+      border-radius: 3px;
+      border: 1px solid #ccc;
+    }
   </style>
 </head>
 <body>
@@ -423,7 +446,7 @@
       const link= document.createElement("a");
       link.href= url;
       link.download= "rezultati.csv";
-      link.textContent= "Lejupielādēt CSV";
+      link.textContent= "📥 Lejupielādēt CSV";
       link.style.display= "inline-block";
       link.style.marginTop="10px";
 
