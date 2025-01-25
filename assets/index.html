@@ -156,11 +156,63 @@
       workers=[];
       freeWorkers=[];
       for (let i=0; i<num; i++){
-        const blob= new Blob([document.getElementById('worker-script').textContent], {type:"application/javascript"});
-        const url= URL.createObjectURL(blob);
-        const w= new Worker(url);
+        const workerCode = `
+          let csvPoints = [];
+          let maxDistance = 0.2;
 
-        w.onmessage= evt=> handleWorkerMessage(w, evt.data);
+          onmessage = function(evt) {
+            const msg = evt.data;
+            if (msg.type === 'initCSV') {
+              csvPoints = msg.csvPoints;
+              maxDistance = msg.maxDistance || 0.2;
+            }
+            else if (msg.type === 'processChunk') {
+              const { buffer, chunkPoints, pointRecordLen, scale, offset } = msg;
+              const dv = new DataView(buffer);
+              let off = 0;
+              const updates = [];
+
+              for (let i = 0; i < chunkPoints; i++) {
+                const Xint = dv.getInt32(off + 0, true);
+                const Yint = dv.getInt32(off + 4, true);
+                const Zint = dv.getInt32(off + 8, true);
+
+                const classification = dv.getUint8(off + 15); // ground=2
+                off += pointRecordLen;
+
+                if (classification === 2) {
+                  const X = Xint * scale[0] + offset[0];
+                  const Y = Yint * scale[1] + offset[1];
+                  const Z = Zint * scale[2] + offset[2];
+
+                  for (let c = 0; c < csvPoints.length; c++) {
+                    const dx = csvPoints[c].x - X;
+                    const dy = csvPoints[c].y - Y;
+                    const dist2 = dx * dx + dy * dy;
+                    if (dist2 <= maxDistance * maxDistance) {
+                      updates.push({
+                        idx: c,
+                        dist: Math.sqrt(dist2),
+                        lasX: X,
+                        lasY: Y,
+                        lasZ: Z
+                      });
+                    }
+                  }
+                }
+              }
+              postMessage({ type: 'chunkResult', payload: updates });
+            }
+            else if (msg.type === 'noMoreChunks') {
+              postMessage({ type: 'done' });
+            }
+          };
+        `;
+        const blob = new Blob([workerCode], { type: "application/javascript" });
+        const url = URL.createObjectURL(blob);
+        const w = new Worker(url);
+
+        w.onmessage = evt => handleWorkerMessage(w, evt.data);
         workers.push(w);
         freeWorkers.push(w);
       }
@@ -170,11 +222,11 @@
       if (msg.type==='chunkResult'){
         // msg.payload = masīvs { idx, dist, lasX, lasY, lasZ }
         for (let upd of msg.payload){
-          if (upd.dist< bestDist[upd.idx]){
-            bestDist[upd.idx]= upd.dist;
-            bestLASX[upd.idx]= upd.lasX;
-            bestLASY[upd.idx]= upd.lasY;
-            bestLASZ[upd.idx]= upd.lasZ;
+          if (upd.dist < bestDist[upd.idx]){
+            bestDist[upd.idx] = upd.dist;
+            bestLASX[upd.idx] = upd.lasX;
+            bestLASY[upd.idx] = upd.lasY;
+            bestLASZ[upd.idx] = upd.lasZ;
           }
         }
         chunksCompleted++;
@@ -194,22 +246,22 @@
      * 4) scheduleChunk
      *********************************************/
     async function scheduleChunk(){
-      if (chunkTasks.length===0){
-        if (chunksCompleted===totalChunks){
+      if (chunkTasks.length === 0){
+        if (chunksCompleted === totalChunks){
           finalizeResults();
         }
         return;
       }
-      if (freeWorkers.length===0) return;
+      if (freeWorkers.length === 0) return;
 
-      const task= chunkTasks.shift();
-      const worker= freeWorkers.pop();
+      const task = chunkTasks.shift();
+      const worker = freeWorkers.pop();
 
-      const blob= lasFile.slice(task.byteStart, task.byteStart+task.byteLength);
-      const ab= await blob.arrayBuffer();
+      const blob = lasFile.slice(task.byteStart, task.byteStart + task.byteLength);
+      const ab = await blob.arrayBuffer();
 
       worker.postMessage({
-        type:'processChunk',
+        type: 'processChunk',
         buffer: ab,
         chunkPoints: task.chunkPoints,
         pointRecordLen: lasInfo.pointRecordLen,
@@ -226,8 +278,8 @@
       let lines=[];
       let statsDZ=[]; // vāc ΔZ
       for (let i=0; i<csvPoints.length; i++){
-        if (bestDist[i]<Infinity){
-          const dz= csvPoints[i].z - bestLASZ[i];
+        if (bestDist[i] < Infinity){
+          const dz = csvPoints[i].z - bestLASZ[i];
           lines.push({
             csvX: csvPoints[i].x,
             csvY: csvPoints[i].y,
@@ -289,13 +341,13 @@
       if (n>0){
         let minDZ=null, maxDZ=null, sumDZ=0, sumDZ2=0;
         for (let dz of statsDZ){
-          if (minDZ===null|| dz<minDZ) minDZ=dz;
-          if (maxDZ===null|| dz>maxDZ) maxDZ=dz;
-          sumDZ+= dz;
-          sumDZ2+= dz*dz;
+          if (minDZ===null|| dz < minDZ) minDZ = dz;
+          if (maxDZ===null|| dz > maxDZ) maxDZ = dz;
+          sumDZ += dz;
+          sumDZ2 += dz * dz;
         }
-        let meanDZ= sumDZ/n;
-        let rmse= Math.sqrt(sumDZ2/n);
+        let meanDZ = sumDZ / n;
+        let rmse = Math.sqrt(sumDZ2 / n);
 
         statsHTML= `
           <p><strong>Statistika</strong>:</p>
@@ -324,13 +376,13 @@
       };
       for (let dz of statsDZ){
         let dzAbs= Math.abs(dz);
-        if (dzAbs<=0.1) {
+        if (dzAbs <= 0.1) {
           rangeCounts.green++;
-        } else if (dzAbs<=0.2) {
+        } else if (dzAbs <= 0.2) {
           rangeCounts.orange++;
-        } else if (dzAbs<=0.5) {
+        } else if (dzAbs <= 0.5) {
           rangeCounts.red++;
-        } else if (dzAbs<=1.0) {
+        } else if (dzAbs <= 1.0) {
           rangeCounts.blue++;
         } else {
           rangeCounts.violet++;
@@ -394,7 +446,7 @@
       try {
         // Distance
         const userDist= parseFloat(maxDistInput.value);
-        const maxDist= (!isNaN(userDist) && userDist>0)? userDist:0.2;
+        const maxDist= (!isNaN(userDist) && userDist > 0)? userDist : 0.2;
 
         // 1) CSV
         statusDiv.textContent="Nolasa CSV...";
@@ -413,16 +465,16 @@
         chunkTasks=[];
         let pointsRemaining= lasInfo.numPoints;
         let currentByteOffset= lasInfo.pointDataOffset;
-        while(pointsRemaining>0){
+        while(pointsRemaining > 0){
           const chunkPoints= Math.min(CHUNK_SIZE, pointsRemaining);
-          const byteLen= chunkPoints*lasInfo.pointRecordLen;
+          const byteLen= chunkPoints * lasInfo.pointRecordLen;
           chunkTasks.push({
             chunkPoints,
             byteStart: currentByteOffset,
             byteLength: byteLen
           });
-          currentByteOffset+= byteLen;
-          pointsRemaining-= chunkPoints;
+          currentByteOffset += byteLen;
+          pointsRemaining -= chunkPoints;
         }
         totalChunks= chunkTasks.length;
         chunksCompleted=0;
@@ -434,7 +486,7 @@
         // 5) initCSV
         for (let w of workers){
           w.postMessage({
-            type:'initCSV',
+            type: 'initCSV',
             csvPoints,
             maxDistance: maxDist
           });
@@ -450,62 +502,6 @@
         errorDiv.textContent="Kļūda: "+err.message;
       }
     });
-
-    <!--
-      II. WORKER SCRIPT (inline),
-      meklē classification=2, atgriež { dist, lasX, lasY, lasZ }
-    -->
-    <script type="javascript/worker" id="worker-script">
-      let csvPoints=[];
-      let maxDistance=0.2;
-
-      onmessage= function(evt){
-        const msg= evt.data;
-        if (msg.type==='initCSV'){
-          csvPoints= msg.csvPoints;
-          maxDistance= msg.maxDistance||0.2;
-        }
-        else if (msg.type==='processChunk'){
-          const {buffer, chunkPoints, pointRecordLen, scale, offset}= msg;
-          const dv= new DataView(buffer);
-          let off=0;
-          const updates=[];
-
-          for (let i=0; i<chunkPoints; i++){
-            const Xint= dv.getInt32(off+0, true);
-            const Yint= dv.getInt32(off+4, true);
-            const Zint= dv.getInt32(off+8, true);
-
-            const classification= dv.getUint8(off+15); // ground=2
-            off+= pointRecordLen;
-
-            if (classification===2){
-              const X= Xint*scale[0] + offset[0];
-              const Y= Yint*scale[1] + offset[1];
-              const Z= Zint*scale[2] + offset[2];
-
-              for (let c=0; c<csvPoints.length; c++){
-                const dx= csvPoints[c].x - X;
-                const dy= csvPoints[c].y - Y;
-                const dist2= dx*dx + dy*dy;
-                if (dist2<= maxDistance*maxDistance){
-                  updates.push({
-                    idx:c,
-                    dist: Math.sqrt(dist2),
-                    lasX:X,
-                    lasY:Y,
-                    lasZ:Z
-                  });
-                }
-              }
-            }
-          }
-          postMessage({type:'chunkResult', payload:updates});
-        }
-        else if (msg.type==='noMoreChunks'){
-          postMessage({type:'done'});
-        }
-      };
-    </script>
+  </script>
 </body>
 </html>
