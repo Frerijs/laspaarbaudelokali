@@ -2,25 +2,39 @@
 <html lang="lv">
 <head>
   <meta charset="UTF-8">
-  <title>LAS + CSV (Ground punkti) ar Statistiku</title>
+  <title>LAS + CSV (Ground punkti) + Statistika + Kļūdu klasifikācija</title>
   <style>
-    body { font-family: sans-serif; margin:20px; }
-    #results table { border-collapse: collapse; width:100%; margin-top:1rem; }
-    #results th, #results td { border:1px solid #ccc; padding:6px 10px; text-align:left; }
-    #error { color:red; font-weight:bold; }
+    body {
+      font-family: sans-serif;
+      margin: 20px;
+    }
+    #results table {
+      border-collapse: collapse;
+      width: 100%;
+      margin-top: 1rem;
+    }
+    #results th, #results td {
+      border: 1px solid #ccc;
+      padding: 6px 10px;
+      text-align: left;
+    }
+    #error {
+      color: red;
+      font-weight: bold;
+    }
   </style>
 </head>
 <body>
-  <h1>LAS un CSV salīdzināšana (tikai classification=2) + Statistika</h1>
+  <h1>LAS (Ground=2) un CSV salīdzināšana + Kļūdu klasifikācija</h1>
 
-  <p><strong>LAS fails (EPSG:3059)</strong>:</p>
+  <p><strong>LAS fails (EPSG:3059):</strong></p>
   <input type="file" id="lasFile" accept=".las" />
 
-  <p><strong>CSV fails (EPSG:3059, x,y,z)</strong>:</p>
+  <p><strong>CSV fails (EPSG:3059, x,y,z):</strong></p>
   <input type="file" id="csvFile" accept=".csv,text/csv" />
 
-  <p><strong>Meklēšanas attālums (m)</strong>:</p>
-  <input type="number" id="maxDistInput" step="0.01" value="0.2" />
+  <p><strong>Meklēšanas attālums (m):</strong></p>
+  <input type="number" id="maxDistInput" value="0.2" step="0.01" />
 
   <br/><br/>
   <button id="processBtn">Sākt apstrādi</button>
@@ -33,9 +47,9 @@
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 
   <script>
-    /***********************************************
+    /*********************************************
      * Galvenie mainīgie
-     ***********************************************/
+     *********************************************/
     const lasInput = document.getElementById("lasFile");
     const csvInput = document.getElementById("csvFile");
     const maxDistInput = document.getElementById("maxDistInput");
@@ -46,28 +60,26 @@
     const resultsDiv = document.getElementById("results");
 
     let csvPoints = [];
-    // Pieglabāsim labāko dist un labākā LAS (X,Y,Z)
     let bestDist = [];
     let bestLASX = [];
     let bestLASY = [];
     let bestLASZ = [];
 
+    // chunk/worker
     let chunkTasks = [];
     let totalChunks = 0;
     let chunksCompleted = 0;
-
     let workers = [];
     let freeWorkers = [];
-
     const CHUNK_SIZE = 100000;
     let numWorkers = navigator.hardwareConcurrency || 4;
 
     let lasFile;
     let lasInfo;
 
-    /***********************************************
+    /*********************************************
      * 1) CSV lasīšana
-     ***********************************************/
+     *********************************************/
     function parseCSV(file) {
       return new Promise((resolve, reject) => {
         Papa.parse(file, {
@@ -85,20 +97,20 @@
                 const Y = parseFloat(keys['y']);
                 const Z = parseFloat(keys['z']);
                 return {x:X, y:Y, z:Z};
-              }).filter(p=>!isNaN(p.x)&&!isNaN(p.y)&&!isNaN(p.z));
+              }).filter(p => !isNaN(p.x) && !isNaN(p.y) && !isNaN(p.z));
               resolve(pts);
-            } catch (err){
+            } catch (err) {
               reject(err);
             }
           },
-          error: err=>reject(err)
+          error: err => reject(err)
         });
       });
     }
 
-    /***********************************************
+    /*********************************************
      * 2) LAS galvene
-     ***********************************************/
+     *********************************************/
     async function readLASHeader(file) {
       const headerSize=375;
       const ab= await file.slice(0, headerSize).arrayBuffer();
@@ -112,8 +124,8 @@
         throw new Error("Failam nav 'LASF' signatūra!");
       }
 
-      const pointDataOffset= dv.getUint32(96, true);
-      const numPoints= dv.getUint32(107, true);
+      const pointDataOffset= dv.getUint32(96,true);
+      const numPoints= dv.getUint32(107,true);
 
       const sX= dv.getFloat64(131,true);
       const sY= dv.getFloat64(139,true);
@@ -137,9 +149,9 @@
       };
     }
 
-    /***********************************************
+    /*********************************************
      * 3) Worker pool
-     ***********************************************/
+     *********************************************/
     function createWorkerPool(num) {
       workers=[];
       freeWorkers=[];
@@ -166,7 +178,7 @@
           }
         }
         chunksCompleted++;
-        statusDiv.textContent=`Chunki pabeigti: ${chunksCompleted}/${totalChunks}`;
+        statusDiv.textContent=`Chunki pabeigti: ${chunksCompleted} / ${totalChunks}`;
         freeWorkers.push(worker);
         scheduleChunk();
       }
@@ -178,12 +190,12 @@
       }
     }
 
-    /***********************************************
-     * 4) Chunk scheduling
-     ***********************************************/
+    /*********************************************
+     * 4) scheduleChunk
+     *********************************************/
     async function scheduleChunk(){
       if (chunkTasks.length===0){
-        if (chunksCompleted=== totalChunks){
+        if (chunksCompleted===totalChunks){
           finalizeResults();
         }
         return;
@@ -206,16 +218,13 @@
       }, [ab]);
     }
 
-    /***********************************************
-     * 5) finalizeResults – tagad ar Statistiku
-     ***********************************************/
+    /*********************************************
+     * 5) finalizeResults – Statistika + Kļūdu klasifikācija
+     *********************************************/
     function finalizeResults(){
-      statusDiv.textContent= "Veido rezultātu un statistiku (tikai rindas ar dist)...";
-
-      // Arrays for table + stats
-      let lines= [];
-      let statsDZ= [];  // Vāksim ΔZ
-
+      statusDiv.textContent="Veido rezultātu ar statistiku un klasifikāciju...";
+      let lines=[];
+      let statsDZ=[]; // vāc ΔZ
       for (let i=0; i<csvPoints.length; i++){
         if (bestDist[i]<Infinity){
           const dz= csvPoints[i].z - bestLASZ[i];
@@ -233,17 +242,19 @@
         }
       }
 
-      // Tagad varēsim izveidot tabulu
-      let html = `<table>
-      <tr>
-        <th>CSV X</th><th>CSV Y</th><th>CSV Z</th>
-        <th>LAS X</th><th>LAS Y</th><th>LAS Z</th>
-        <th>dist</th><th>ΔZ</th>
-      </tr>`;
-      let csvLines = ["CSV_X,CSV_Y,CSV_Z,LAS_X,LAS_Y,LAS_Z,Dist,DeltaZ"];
+      /*********************************************
+       * 5.1. Galvenā tabula (tikai rindas ar dist)
+       *********************************************/
+      let htmlTable = `<table>
+        <tr>
+          <th>CSV X</th><th>CSV Y</th><th>CSV Z</th>
+          <th>LAS X</th><th>LAS Y</th><th>LAS Z</th>
+          <th>dist</th><th>ΔZ</th>
+        </tr>`;
+      let csvLines= ["CSV_X,CSV_Y,CSV_Z,LAS_X,LAS_Y,LAS_Z,Dist,DeltaZ"];
 
       for (let row of lines){
-        html += `
+        htmlTable += `
           <tr>
             <td>${row.csvX.toFixed(3)}</td>
             <td>${row.csvY.toFixed(3)}</td>
@@ -256,6 +267,7 @@
             <td>${row.dist.toFixed(3)}</td>
             <td>${row.dz.toFixed(3)}</td>
           </tr>`;
+
         csvLines.push([
           row.csvX.toFixed(3),
           row.csvY.toFixed(3),
@@ -267,21 +279,24 @@
           row.dz.toFixed(3)
         ].join(","));
       }
-      html+="</table>";
+      htmlTable += "</table>";
 
-      // Aprēķinām statistiku
-      const n= statsDZ.length; // cik punkti
-      let minDZ= null, maxDZ= null, sumDZ=0, sumDZ2=0; // RMS => sqrt( sum(dz^2)/n )
-      for (let dz of statsDZ){
-        if (minDZ===null|| dz< minDZ) minDZ= dz;
-        if (maxDZ===null|| dz> maxDZ) maxDZ= dz;
-        sumDZ+= dz;
-        sumDZ2+= dz*dz;
-      }
-      let statsHTML= "";
+      /*********************************************
+       * 5.2. Statistika (min, max, mean, rmse)
+       *********************************************/
+      let n= statsDZ.length;
+      let statsHTML="";
       if (n>0){
-        const meanDZ= sumDZ / n;  // vid
-        const rmse= Math.sqrt(sumDZ2/n); // kv.vid.kļ.
+        let minDZ=null, maxDZ=null, sumDZ=0, sumDZ2=0;
+        for (let dz of statsDZ){
+          if (minDZ===null|| dz<minDZ) minDZ=dz;
+          if (maxDZ===null|| dz>maxDZ) maxDZ=dz;
+          sumDZ+= dz;
+          sumDZ2+= dz*dz;
+        }
+        let meanDZ= sumDZ/n;
+        let rmse= Math.sqrt(sumDZ2/n);
+
         statsHTML= `
           <p><strong>Statistika</strong>:</p>
           <ul>
@@ -293,17 +308,62 @@
           </ul>
         `;
       } else {
-        statsHTML= "<p><strong>Statistika</strong>: Neviens CSV punkts nav atradis tuvu LAS (dist)!</p>";
+        statsHTML= `<p><strong>Statistika</strong>: Nevienam CSV punktam nav tuvā ground LAS punkta!</p>`;
       }
 
-      // Izveido galarezultātu + statistiku
-      resultsDiv.innerHTML = `
-        <h3>Rezultāti (tikai rindas ar dist &lt;∞)</h3>
-        ${statsHTML}
-        ${html}
+      /*********************************************
+       * 5.3. Kļūdu klasifikācija
+       *     izmantojam abs(ΔZ), un summējam pa diapazoniem
+       *********************************************/
+      let rangeCounts = {
+        green: 0,     // <=0.1
+        orange: 0,    // 0.1..0.2
+        red: 0,       // 0.2..0.5
+        blue: 0,      // 0.5..1.0
+        violet: 0     // >1.0
+      };
+      for (let dz of statsDZ){
+        let dzAbs= Math.abs(dz);
+        if (dzAbs<=0.1) {
+          rangeCounts.green++;
+        } else if (dzAbs<=0.2) {
+          rangeCounts.orange++;
+        } else if (dzAbs<=0.5) {
+          rangeCounts.red++;
+        } else if (dzAbs<=1.0) {
+          rangeCounts.blue++;
+        } else {
+          rangeCounts.violet++;
+        }
+      }
+
+      // Veidojam HTML tabulu
+      let classificationHTML= `
+        <h4>Kļūdu klasifikācija (|ΔZ|):</h4>
+        <table>
+          <tr><th>Interval</th><th>Krāsa</th><th>Punktu skaits</th></tr>
+          <tr style="background: #afffa6;"><td>līdz 0.1&nbsp;m</td><td style="color:green;">zaļa</td><td>${rangeCounts.green}</td></tr>
+          <tr style="background: #ffeaa6;"><td>0.1–0.2&nbsp;m</td><td style="color:orange;">oranža</td><td>${rangeCounts.orange}</td></tr>
+          <tr style="background: #ffaaaa;"><td>0.2–0.5&nbsp;m</td><td style="color:red;">sarkana</td><td>${rangeCounts.red}</td></tr>
+          <tr style="background: #aaaaff;"><td>0.5–1.0&nbsp;m</td><td style="color:blue;">zilā</td><td>${rangeCounts.blue}</td></tr>
+          <tr style="background: #e6a6ff;"><td>virs 1.0&nbsp;m</td><td style="color:purple;">violetā</td><td>${rangeCounts.violet}</td></tr>
+        </table>
       `;
 
-      // CSV lejupielādei
+      /*********************************************
+       * 5.4. Ievietojam visu resultsDiv
+       *********************************************/
+      // Apvienojam statistiku, klasifikāciju un tabulu
+      resultsDiv.innerHTML= `
+        <h3>Rezultāti (tikai rindas ar dist &lt;∞, classification=2)</h3>
+        ${statsHTML}
+        ${classificationHTML}
+        ${htmlTable}
+      `;
+
+      /*********************************************
+       * 5.5. CSV lejupielāde
+       *********************************************/
       const csvText= csvLines.join("\n");
       const blob= new Blob([csvText], {type:"text/csv"});
       const url= URL.createObjectURL(blob);
@@ -319,27 +379,26 @@
       resultsDiv.appendChild(link);
     }
 
-    /***********************************************
+    /*********************************************
      * 6) Pogas "Sākt apstrādi"
-     ***********************************************/
+     *********************************************/
     processBtn.addEventListener('click', async()=>{
       errorDiv.textContent="";
       resultsDiv.innerHTML="";
       statusDiv.textContent="";
 
       if (!csvInput.files.length || !lasInput.files.length){
-        errorDiv.textContent="Lūdzu, atlasiet gan LAS, gan CSV!";
+        errorDiv.textContent="Lūdzu, atlasiet gan LAS, gan CSV failu!";
         return;
       }
       try {
-        // distance
+        // Distance
         const userDist= parseFloat(maxDistInput.value);
-        const maxDist= (!isNaN(userDist)&& userDist>0) ? userDist : 0.2;
+        const maxDist= (!isNaN(userDist) && userDist>0)? userDist:0.2;
 
         // 1) CSV
         statusDiv.textContent="Nolasa CSV...";
         csvPoints= await parseCSV(csvInput.files[0]);
-        // Iniciēt bestDist
         bestDist= new Array(csvPoints.length).fill(Infinity);
         bestLASX= new Array(csvPoints.length).fill(null);
         bestLASY= new Array(csvPoints.length).fill(null);
@@ -354,11 +413,9 @@
         chunkTasks=[];
         let pointsRemaining= lasInfo.numPoints;
         let currentByteOffset= lasInfo.pointDataOffset;
-        let totalPointsRead=0;
-
         while(pointsRemaining>0){
           const chunkPoints= Math.min(CHUNK_SIZE, pointsRemaining);
-          const byteLen= chunkPoints* lasInfo.pointRecordLen;
+          const byteLen= chunkPoints*lasInfo.pointRecordLen;
           chunkTasks.push({
             chunkPoints,
             byteStart: currentByteOffset,
@@ -366,13 +423,12 @@
           });
           currentByteOffset+= byteLen;
           pointsRemaining-= chunkPoints;
-          totalPointsRead+= chunkPoints;
         }
         totalChunks= chunkTasks.length;
         chunksCompleted=0;
-        statusDiv.textContent=`Sagatavoti ${totalChunks} chunki. (distance=${maxDist} m)`;
+        statusDiv.textContent=`Sagatavoti ${totalChunks} chunki (distance=${maxDist}m, only ground=2).`;
 
-        // 4) Worker pool
+        // 4) Izveido Worker baseinu
         createWorkerPool(numWorkers);
 
         // 5) initCSV
@@ -380,32 +436,31 @@
           w.postMessage({
             type:'initCSV',
             csvPoints,
-            maxDistance:maxDist
+            maxDistance: maxDist
           });
         }
 
-        // 6) start chunk
+        // 6) Uzsāk
         for (let i=0; i<freeWorkers.length; i++){
           scheduleChunk();
         }
 
       } catch(err){
         console.error(err);
-        errorDiv.textContent= "Kļūda: " + err.message;
+        errorDiv.textContent="Kļūda: "+err.message;
       }
     });
   </script>
 
   <!--
-    II. Worker SCRIPT
-    Tagad lasām classification=2
-    ja (classification===2), tad aprēķina dist
+    II. WORKER SCRIPT (inline),
+    meklē classification=2, atgriež { dist, lasX, lasY, lasZ }
   -->
   <script type="javascript/worker" id="worker-script">
     let csvPoints=[];
     let maxDistance=0.2;
 
-    onmessage= (evt)=>{
+    onmessage= function(evt){
       const msg= evt.data;
       if (msg.type==='initCSV'){
         csvPoints= msg.csvPoints;
@@ -422,24 +477,25 @@
           const Yint= dv.getInt32(off+4, true);
           const Zint= dv.getInt32(off+8, true);
 
-          // classification= dv.getUint8(off+15) (assuming format 0..3)
-          const classification= dv.getUint8(off+15);
+          const classification= dv.getUint8(off+15); // ground=2
           off+= pointRecordLen;
 
-          if (classification===2){ // ground only
+          if (classification===2){
             const X= Xint*scale[0] + offset[0];
             const Y= Yint*scale[1] + offset[1];
             const Z= Zint*scale[2] + offset[2];
 
             for (let c=0; c<csvPoints.length; c++){
-              const dx= csvPoints[c].x- X;
-              const dy= csvPoints[c].y- Y;
+              const dx= csvPoints[c].x - X;
+              const dy= csvPoints[c].y - Y;
               const dist2= dx*dx + dy*dy;
-              if (dist2 <= maxDistance*maxDistance){
+              if (dist2<= maxDistance*maxDistance){
                 updates.push({
                   idx:c,
                   dist: Math.sqrt(dist2),
-                  lasX:X, lasY:Y, lasZ:Z
+                  lasX:X,
+                  lasY:Y,
+                  lasZ:Z
                 });
               }
             }
@@ -452,6 +508,5 @@
       }
     };
   </script>
-
 </body>
 </html>
